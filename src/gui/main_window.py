@@ -485,11 +485,7 @@ class MainWindow(QtWidgets.QMainWindow):
         display = current.text()
         basename = display[5:] if display.startswith("[OK] ") else display
         self._current_basename = basename
-        auto_name = os.path.splitext(basename)[0]
-        if not self.name_edit.text() or self.name_edit.text() in [
-            os.path.splitext(os.path.basename(p))[0] for p in self._file_paths.values()
-        ]:
-            self.name_edit.setText(auto_name)
+        self.name_edit.setText(os.path.splitext(basename)[0])
 
         if basename in self._all_results:
             self._display_results(self._all_results[basename])
