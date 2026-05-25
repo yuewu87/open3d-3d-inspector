@@ -22,14 +22,20 @@ def main():
     parser = argparse.ArgumentParser(description='三维点云视觉检测系统')
     parser.add_argument('input', help='PLY 点云文件路径')
     parser.add_argument('--voxel-size', type=float, default=0.5, help='体素降采样尺寸')
+    parser.add_argument('--name', default=None, help='工件名称（默认使用文件名）')
     parser.add_argument('--output-dim', default='dimensions.txt', help='尺寸输出文件')
     parser.add_argument('--output-bbox', default='bbox.png', help='包围盒输出图像')
     parser.add_argument('--output-heatmap', default='heatmap.png', help='热力图输出图像')
     parser.add_argument('--log', default='inspection.log', help='日志文件路径')
     args = parser.parse_args()
 
+    # 工件名称：优先使用 --name，否则用文件名（去掉扩展名）
+    import os as _os
+    workpiece_name = args.name if args.name else _os.path.splitext(_os.path.basename(args.input))[0]
+
     logger = setup_logging(args.log)
     logger.info("=== 三维检测开始 ===")
+    logger.info(f"工件名称: {workpiece_name}")
     logger.info(f"输入文件: {args.input}")
 
     try:
@@ -63,11 +69,11 @@ def main():
         deviations = deviation_heatmap(pcd)
 
         # 5. 可视化
-        fig_bbox = draw_bounding_box(pcd, dims, title="涡轮旋转片 — 包围盒")
+        fig_bbox = draw_bounding_box(pcd, dims, title=f"{workpiece_name} — 包围盒")
         fig_bbox.savefig(args.output_bbox, dpi=150)
         logger.info(f"包围盒图像已保存至 {args.output_bbox}")
 
-        fig_heat = draw_heatmap(pcd, deviations, title="涡轮旋转片 — 偏差热力图")
+        fig_heat = draw_heatmap(pcd, deviations, title=f"{workpiece_name} — 偏差热力图")
         fig_heat.savefig(args.output_heatmap, dpi=150)
         logger.info(f"热力图图像已保存至 {args.output_heatmap}")
 
