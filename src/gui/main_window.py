@@ -518,12 +518,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ==================== 检测 ====================
     def _run_inspection(self, filepath=None, basename=None):
-        if filepath is None:
+        # QPushButton.clicked 信号会传 False，需要过滤
+        if not isinstance(filepath, str) or not filepath:
             filepath = self.file_edit.text().strip()
         if not filepath or not os.path.isfile(filepath):
             QtWidgets.QMessageBox.warning(self, "提示", "请先从文件列表中选择一个 PLY 文件。")
             return
-        if basename is None:
+        if not isinstance(basename, str) or not basename:
             basename = os.path.basename(filepath)
 
         name = self.name_edit.text().strip() or os.path.splitext(basename)[0]
