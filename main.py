@@ -21,7 +21,7 @@ from src.visualization import draw_bounding_box, draw_heatmap
 def main():
     parser = argparse.ArgumentParser(description='三维点云视觉检测系统')
     parser.add_argument('input', help='PLY 点云文件路径')
-    parser.add_argument('--voxel-size', type=float, default=0.001, help='体素降采样尺寸 (米)')
+    parser.add_argument('--voxel-size', type=float, default=0.5, help='体素降采样尺寸')
     parser.add_argument('--output-dim', default='dimensions.txt', help='尺寸输出文件')
     parser.add_argument('--output-bbox', default='bbox.png', help='包围盒输出图像')
     parser.add_argument('--output-heatmap', default='heatmap.png', help='热力图输出图像')
@@ -48,11 +48,11 @@ def main():
         # 4. 测量
         dims = extract_dimensions(pcd)
 
-        # 保存尺寸
-        with open(args.output_dim, 'w') as f:
-            f.write(f"长度 (X): {dims['length']*1000:.3f} mm\n")
-            f.write(f"宽度 (Y): {dims['width']*1000:.3f} mm\n")
-            f.write(f"高度 (Z): {dims['height']*1000:.3f} mm\n")
+        # 保存尺寸（数据已为 mm 单位，无需转换）
+        with open(args.output_dim, 'w', encoding='utf-8') as f:
+            f.write(f"长度 (X): {dims['length']:.3f} mm\n")
+            f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
+            f.write(f"高度 (Z): {dims['height']:.3f} mm\n")
         logger.info(f"尺寸已保存至 {args.output_dim}")
 
         # 截面示例（z=0 处）
@@ -72,7 +72,7 @@ def main():
         logger.info(f"热力图图像已保存至 {args.output_heatmap}")
 
         print(f"\n=== 检测完成 ===")
-        print(f"尺寸 (mm): 长={dims['length']*1000:.3f} 宽={dims['width']*1000:.3f} 高={dims['height']*1000:.3f}")
+        print(f"尺寸 (mm): 长={dims['length']:.3f} 宽={dims['width']:.3f} 高={dims['height']:.3f}")
         print(f"输出文件: {args.output_dim}, {args.output_bbox}, {args.output_heatmap}")
 
     except FileFormatError as e:

@@ -50,9 +50,9 @@ def draw_bounding_box(pcd: o3d.geometry.PointCloud, dimensions: dict = None, tit
     ax.set_title(title)
     if dimensions:
         ax.text2D(0.02, 0.98,
-                  f"长: {dimensions['length'] * 1000:.2f} mm\n"
-                  f"宽: {dimensions['width'] * 1000:.2f} mm\n"
-                  f"高: {dimensions['height'] * 1000:.2f} mm",
+                  f"长: {dimensions['length']:.2f} mm\n"
+                  f"宽: {dimensions['width']:.2f} mm\n"
+                  f"高: {dimensions['height']:.2f} mm",
                   transform=ax.transAxes, fontsize=10, verticalalignment='top',
                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
     plt.tight_layout()

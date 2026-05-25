@@ -27,7 +27,7 @@ def extract_dimensions(pcd: o3d.geometry.PointCloud) -> dict:
     """提取关键尺寸（AABB 长宽高）"""
     info = compute_aabb(pcd)
     logger.info(
-        f"尺寸: L={info['length']:.4f} W={info['width']:.4f} H={info['height']:.4f} (米, AABB)"
+        f"尺寸: L={info['length']:.4f} W={info['width']:.4f} H={info['height']:.4f} (mm, AABB)"
     )
     return {
         'length': info['length'],
