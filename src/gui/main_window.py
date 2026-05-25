@@ -503,7 +503,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._status.setStyleSheet("color: #909399; font-size: 14px; padding: 6px;")
 
     def _apply_name(self):
-        """手动确认/修改工件名称"""
+        """手动确认/修改工件名称，同时重写已输出的 txt 文件"""
         basename = getattr(self, '_current_basename', '')
         if not basename:
             return
@@ -511,10 +511,22 @@ class MainWindow(QtWidgets.QMainWindow):
         if not new_name:
             new_name = os.path.splitext(basename)[0]
             self.name_edit.setText(new_name)
-        # 如果已有缓存结果，更新名称
+        # 如果已有缓存结果，更新名称并重写 txt
         if basename in self._all_results:
-            self._all_results[basename]['workpiece_name'] = new_name
-            self._display_results(self._all_results[basename])
+            r = self._all_results[basename]
+            r['workpiece_name'] = new_name
+            self._display_results(r)
+            # 重写 dimensions.txt
+            dim_path = r.get('dim_path', '')
+            if dim_path and os.path.exists(dim_path):
+                with open(dim_path, 'w', encoding='utf-8') as f:
+                    f.write(f"文件名: {basename}\n")
+                    f.write(f"工件名称: {new_name}\n")
+                    f.write(f"检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"处理后点数: {r['point_count']}\n---\n")
+                    f.write(f"长度 (X): {r['dims']['length']:.3f} mm\n")
+                    f.write(f"宽度 (Y): {r['dims']['width']:.3f} mm\n")
+                    f.write(f"高度 (Z): {r['dims']['height']:.3f} mm\n")
         self._status.setText(f"工件名称已更新: {new_name}")
         self._status.setStyleSheet("color: #67c23a; font-size: 14px; padding: 6px;")
 
