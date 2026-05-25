@@ -3,9 +3,27 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # 非交互后端，避免测试时弹出窗口
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import open3d as o3d
 
 logger = logging.getLogger("open3d_inspection")
+
+# 尝试使用系统中文字体
+_CJK_FONT = None
+for _font_name in ['Microsoft YaHei', 'SimHei', 'SimSun', 'FangSong', 'KaiTi']:
+    for _f in fm.fontManager.ttflist:
+        if _font_name in _f.name:
+            _CJK_FONT = _f.name
+            break
+    if _CJK_FONT:
+        break
+
+if _CJK_FONT:
+    plt.rcParams['font.sans-serif'] = [_CJK_FONT, 'DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
+    logger.info(f"Using CJK font: {_CJK_FONT}")
+else:
+    logger.warning("No CJK font found, Chinese characters may not render")
 
 
 def draw_bounding_box(pcd: o3d.geometry.PointCloud, dimensions: dict = None, title: str = "包围盒"):

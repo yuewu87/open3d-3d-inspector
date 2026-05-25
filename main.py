@@ -1,6 +1,16 @@
-"""Open3D 工业产品三维视觉检测系统"""
+"""Open3D Industrial 3D Visual Inspection System."""
 import argparse
 import sys
+import io
+
+# 强制 stdout/stderr 使用 UTF-8 编码，避免 Windows GBK 终端乱码
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+elif hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 from src.utils import setup_logging, FileFormatError, PointCloudValidationError
 from src.preprocessing import load_ply, voxel_downsample, statistical_outlier_removal, estimate_normals
 from src.registration import pca_align
