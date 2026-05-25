@@ -2,6 +2,8 @@
 import argparse
 import sys
 import io
+import os
+from datetime import datetime
 
 # 强制 stdout/stderr 使用 UTF-8 编码，避免 Windows GBK 终端乱码
 if hasattr(sys.stdout, 'reconfigure'):
@@ -23,20 +25,27 @@ def main():
     parser.add_argument('input', help='PLY 点云文件路径')
     parser.add_argument('--voxel-size', type=float, default=0.5, help='体素降采样尺寸')
     parser.add_argument('--name', default=None, help='工件名称（默认使用文件名）')
-    parser.add_argument('--output-dim', default='dimensions.txt', help='尺寸输出文件')
-    parser.add_argument('--output-bbox', default='bbox.png', help='包围盒输出图像')
-    parser.add_argument('--output-heatmap', default='heatmap.png', help='热力图输出图像')
-    parser.add_argument('--log', default='inspection.log', help='日志文件路径')
+    parser.add_argument('--output-dir', default='output', help='输出根目录')
     args = parser.parse_args()
 
-    # 工件名称：优先使用 --name，否则用文件名（去掉扩展名）
-    import os as _os
-    workpiece_name = args.name if args.name else _os.path.splitext(_os.path.basename(args.input))[0]
+    # 工件名称
+    workpiece_name = args.name if args.name else os.path.splitext(os.path.basename(args.input))[0]
 
-    logger = setup_logging(args.log)
+    # 创建输出子目录: output/<名称>_<时间戳>/
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_dir = os.path.join(args.output_dir, f"{workpiece_name}_{timestamp}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    log_path = os.path.join(output_dir, 'inspection.log')
+    dim_path = os.path.join(output_dir, 'dimensions.txt')
+    bbox_path = os.path.join(output_dir, 'bbox.png')
+    heatmap_path = os.path.join(output_dir, 'heatmap.png')
+
+    logger = setup_logging(log_path)
     logger.info("=== 三维检测开始 ===")
     logger.info(f"工件名称: {workpiece_name}")
     logger.info(f"输入文件: {args.input}")
+    logger.info(f"输出目录: {output_dir}")
 
     try:
         # 1. 加载
@@ -54,14 +63,19 @@ def main():
         # 4. 测量
         dims = extract_dimensions(pcd)
 
-        # 保存尺寸（数据已为 mm 单位，无需转换）
-        with open(args.output_dim, 'w', encoding='utf-8') as f:
+        # 保存尺寸
+        with open(dim_path, 'w', encoding='utf-8') as f:
+            f.write(f"工件名称: {workpiece_name}\n")
+            f.write(f"检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"输入文件: {args.input}\n")
+            f.write(f"处理点数: {len(pcd.points)}\n")
+            f.write(f"---\n")
             f.write(f"长度 (X): {dims['length']:.3f} mm\n")
             f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
             f.write(f"高度 (Z): {dims['height']:.3f} mm\n")
-        logger.info(f"尺寸已保存至 {args.output_dim}")
+        logger.info(f"尺寸已保存至 {dim_path}")
 
-        # 截面示例（z=0 处）
+        # 截面
         section = cross_section(pcd, axis='z', position=0.0)
         logger.info(f"z=0 处截面: {len(section)} 个点")
 
@@ -70,16 +84,21 @@ def main():
 
         # 5. 可视化
         fig_bbox = draw_bounding_box(pcd, dims, title=f"{workpiece_name} — 包围盒")
-        fig_bbox.savefig(args.output_bbox, dpi=150)
-        logger.info(f"包围盒图像已保存至 {args.output_bbox}")
+        fig_bbox.savefig(bbox_path, dpi=150)
+        logger.info(f"包围盒图像已保存至 {bbox_path}")
 
         fig_heat = draw_heatmap(pcd, deviations, title=f"{workpiece_name} — 偏差热力图")
-        fig_heat.savefig(args.output_heatmap, dpi=150)
-        logger.info(f"热力图图像已保存至 {args.output_heatmap}")
+        fig_heat.savefig(heatmap_path, dpi=150)
+        logger.info(f"热力图图像已保存至 {heatmap_path}")
 
         print(f"\n=== 检测完成 ===")
+        print(f"工件: {workpiece_name}")
         print(f"尺寸 (mm): 长={dims['length']:.3f} 宽={dims['width']:.3f} 高={dims['height']:.3f}")
-        print(f"输出文件: {args.output_dim}, {args.output_bbox}, {args.output_heatmap}")
+        print(f"输出目录: {output_dir}")
+        print(f"  {os.path.basename(dim_path)}")
+        print(f"  {os.path.basename(bbox_path)}")
+        print(f"  {os.path.basename(heatmap_path)}")
+        print(f"  {os.path.basename(log_path)}")
 
     except FileFormatError as e:
         logger.error(str(e))
