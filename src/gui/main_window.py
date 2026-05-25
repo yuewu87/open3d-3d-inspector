@@ -245,7 +245,7 @@ class InspectionWorker(QtCore.QThread):
         try:
             self.progress.emit("正在加载点云文件...")
             pcd = load_ply(self.filepath)
-            self.progress.emit(f"✓ 已加载 {len(pcd.points):,} 个点")
+            self.progress.emit(f"[OK] 已加载 {len(pcd.points):,} 个点")
 
             self.progress.emit("体素降采样中...")
             pcd = voxel_downsample(pcd, voxel_size=self.voxel_size)
@@ -296,7 +296,7 @@ class InspectionWorker(QtCore.QThread):
                                     title=f"{self.workpiece_name} — Deviation Heatmap")
             fig_heat.savefig(heatmap_path, dpi=150)
 
-            self.progress.emit("✓ 检测完成")
+            self.progress.emit("[OK] 检测完成")
             self.finished.emit({
                 'dims': dims,
                 'pts': pts,
@@ -336,16 +336,16 @@ class MainWindow(QtWidgets.QMainWindow):
         menubar.setStyleSheet("QMenuBar { background: #ffffff; border-bottom: 1px solid #e8eaed; }")
 
         file_menu = menubar.addMenu("  文件(&F)  ")
-        file_menu.addAction("📂  打开 PLY 文件...", self._browse_file,
+        file_menu.addAction("打开 PLY 文件...", self._browse_file,
                            QtCore.Qt.CTRL + QtCore.Qt.Key_O)
         file_menu.addSeparator()
         file_menu.addAction("  退出(&Q)", self.close, QtCore.Qt.CTRL + QtCore.Qt.Key_Q)
 
         view_menu = menubar.addMenu("  视图(&V)  ")
-        view_menu.addAction("🔄  重置视图", self._reset_view)
+        view_menu.addAction("重置视图", self._reset_view)
 
         help_menu = menubar.addMenu("  帮助(&H)  ")
-        help_menu.addAction("ℹ️  关于", self._about)
+        help_menu.addAction("关于", self._about)
 
     # ==================== UI 布局 ====================
     def _setup_ui(self):
@@ -365,7 +365,7 @@ class MainWindow(QtWidgets.QMainWindow):
         left.setSpacing(4)
 
         # -- 标题 --
-        title = QtWidgets.QLabel("🔍 检测控制台")
+        title = QtWidgets.QLabel("检测控制台")
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #303133; padding: 4px 0;")
         left.addWidget(title)
 
@@ -413,7 +413,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # -- 运行按钮 --
         left.addSpacing(8)
-        self.run_btn = QtWidgets.QPushButton("▶  开始检测")
+        self.run_btn = QtWidgets.QPushButton("开始检测")
         self.run_btn.setObjectName("runBtn")
         self.run_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.run_btn.setMinimumHeight(44)
@@ -447,7 +447,7 @@ class MainWindow(QtWidgets.QMainWindow):
         left.addWidget(result_group)
 
         # -- 打开目录 --
-        self.open_dir_btn = QtWidgets.QPushButton("📁 打开输出目录")
+        self.open_dir_btn = QtWidgets.QPushButton("打开输出目录")
         self.open_dir_btn.setObjectName("openDirBtn")
         self.open_dir_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.open_dir_btn.clicked.connect(self._open_output_dir)
@@ -474,15 +474,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Tab 1: 3D 预览
         self.preview_canvas = FigureCanvas(Figure(figsize=(6, 5)))
-        self.tab_widget.addTab(self.preview_canvas, "  🖼  3D 预览  ")
+        self.tab_widget.addTab(self.preview_canvas, "  3D 预览  ")
 
         # Tab 2: 包围盒
         self.bbox_canvas = FigureCanvas(Figure(figsize=(6, 5)))
-        self.tab_widget.addTab(self.bbox_canvas, "  📦  包围盒  ")
+        self.tab_widget.addTab(self.bbox_canvas, "  包围盒  ")
 
         # Tab 3: 热力图
         self.heatmap_canvas = FigureCanvas(Figure(figsize=(6, 5)))
-        self.tab_widget.addTab(self.heatmap_canvas, "  🌡  偏差热力图  ")
+        self.tab_widget.addTab(self.heatmap_canvas, "  偏差热力图  ")
 
         right.addWidget(self.tab_widget)
 
@@ -570,7 +570,7 @@ class MainWindow(QtWidgets.QMainWindow):
         name = self.name_edit.text().strip() or os.path.splitext(os.path.basename(filepath))[0]
 
         self.run_btn.setEnabled(False)
-        self.run_btn.setText("⏳  处理中...")
+        self.run_btn.setText("处理中...")
         self.progress_bar.show()
         self.result_text.clear()
         self._status.setText("正在检测中...")
@@ -604,20 +604,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._render_heatmap(results)
 
         self.run_btn.setEnabled(True)
-        self.run_btn.setText("▶  开始检测")
+        self.run_btn.setText("开始检测")
         self.progress_bar.hide()
         self.progress_label.setText("")
         self.open_dir_btn.setEnabled(True)
-        self._status.setText(f"✓ 检测完成 — {results['output_dir']}")
+        self._status.setText(f"[OK] 检测完成 — {results['output_dir']}")
         self._status.setStyleSheet("color: #67c23a; font-size: 12px; padding: 4px;")
 
     def _on_error(self, msg):
         QtWidgets.QMessageBox.critical(self, "检测失败", f"处理过程中发生错误：\n\n{msg}")
         self.run_btn.setEnabled(True)
-        self.run_btn.setText("▶  开始检测")
+        self.run_btn.setText("开始检测")
         self.progress_bar.hide()
         self.progress_label.setText("")
-        self._status.setText("✗ 检测失败")
+        self._status.setText("[FAIL] 检测失败")
         self._status.setStyleSheet("color: #f56c6c; font-size: 12px; padding: 4px;")
 
     # ==================== 可视化渲染 ====================
