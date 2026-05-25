@@ -170,6 +170,7 @@ class InspectionWorker(QtCore.QThread):
                 'bbox_path': bbox_path, 'heatmap_path': heatmap_path,
                 'dim_path': dim_path, 'output_dir': output_dir,
                 'workpiece_name': self.workpiece_name, 'point_count': len(pcd.points),
+                'basename': os.path.basename(self.filepath),
             })
         except (FileFormatError, PointCloudValidationError) as e:
             self.error.emit(str(e))
@@ -185,8 +186,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setMinimumSize(1000, 640)
 
         self._file_paths = {}          # basename -> full path
+        self._all_results = {}         # basename -> results dict
+        self._batch_queue = []         # remaining batch items
         self.worker = None
         self.current_results = None
+        self._batch_running = False
 
         self._setup_menu()
         self._setup_ui()
@@ -301,6 +305,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_btn.setMinimumHeight(50)
         self.run_btn.clicked.connect(self._run_inspection)
         left.addWidget(self.run_btn)
+
+        self.batch_btn = QtWidgets.QPushButton("一键批量检测")
+        self.batch_btn.setObjectName("batchBtn")
+        self.batch_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.batch_btn.setMinimumHeight(40)
+        self.batch_btn.clicked.connect(self._run_batch)
+        self.batch_btn.setStyleSheet(
+            "QPushButton { font-size: 15px; font-weight: bold; "
+            "border: 2px solid #409eff; color: #409eff; "
+            "border-radius: 8px; padding: 10px 20px; background: #ecf5ff; }"
+            "QPushButton:hover { background: #d9ecff; }"
+            "QPushButton:disabled { border-color: #c0c4cc; color: #c0c4cc; background: #f5f7fa; }"
+        )
+        left.addWidget(self.batch_btn)
 
         # -- 进度 --
         left.addSpacing(6)
@@ -453,53 +471,69 @@ class MainWindow(QtWidgets.QMainWindow):
         self.file_list.blockSignals(True)
         self.file_list.clear()
         for basename in sorted(self._file_paths.keys()):
-            item = QtWidgets.QListWidgetItem(basename)
+            prefix = "[OK] " if basename in self._all_results else ""
+            item = QtWidgets.QListWidgetItem(prefix + basename)
+            if basename in self._all_results:
+                item.setForeground(QtGui.QColor('#67c23a'))
+                item.setFont(QtGui.QFont(self.file_list.font().family(), self.file_list.font().pointSize(), QtGui.QFont.Bold))
             self.file_list.addItem(item)
         self.file_list.blockSignals(False)
 
     def _clear_file_list(self):
         self._file_paths.clear()
+        self._all_results.clear()
         self.file_list.clear()
         self.file_edit.clear()
         self.name_edit.clear()
+        self._show_placeholders()
+        self.result_text.clear()
         self._status.setText("就绪 — 请导入 PLY 文件开始检测")
         self._status.setStyleSheet("color: #909399; font-size: 14px; padding: 6px;")
 
     def _on_file_selected(self, current, previous):
         if current is None:
             return
-        basename = current.text()
+        # 从列表项中提取纯文件名（去掉 [OK] 前缀）
+        display = current.text()
+        basename = display[5:] if display.startswith("[OK] ") else display
         path = self._file_paths.get(basename, '')
         self.file_edit.setText(path)
-        if not self.name_edit.text() or self.name_edit.text() == os.path.splitext(
-            os.path.basename(self.file_edit.text() or '') if self.file_edit.text() else ''
-        )[0]:
-            pass  # keep user-edited name
-        else:
-            self.name_edit.setText(os.path.splitext(basename)[0])
-        # 自动填充名称（仅当用户未手动修改时）
         auto_name = os.path.splitext(basename)[0]
         if not self.name_edit.text() or self.name_edit.text() in [
             os.path.splitext(os.path.basename(p))[0] for p in self._file_paths.values()
         ]:
             self.name_edit.setText(auto_name)
-        self._status.setText(f"已选择: {basename}")
-        self._status.setStyleSheet("color: #67c23a; font-size: 14px; padding: 6px;")
+
+        # 如果该文件已有缓存结果，直接显示
+        if basename in self._all_results:
+            self._display_results(self._all_results[basename])
+            self._status.setText(f"[OK] {basename} - 已有检测结果")
+            self._status.setStyleSheet("color: #67c23a; font-size: 14px; padding: 6px;")
+        else:
+            self._show_placeholders()
+            self.result_text.clear()
+            self.result_text.setPlaceholderText("等待检测...")
+            self._status.setText(f"已选择: {basename} (未检测)")
+            self._status.setStyleSheet("color: #909399; font-size: 14px; padding: 6px;")
 
     # ==================== 检测 ====================
-    def _run_inspection(self):
-        filepath = self.file_edit.text().strip()
+    def _run_inspection(self, filepath=None, basename=None):
+        if filepath is None:
+            filepath = self.file_edit.text().strip()
         if not filepath or not os.path.isfile(filepath):
             QtWidgets.QMessageBox.warning(self, "提示", "请先从文件列表中选择一个 PLY 文件。")
             return
+        if basename is None:
+            basename = os.path.basename(filepath)
 
-        name = self.name_edit.text().strip() or os.path.splitext(os.path.basename(filepath))[0]
+        name = self.name_edit.text().strip() or os.path.splitext(basename)[0]
 
         self.run_btn.setEnabled(False)
+        self.batch_btn.setEnabled(False)
         self.run_btn.setText("处理中...")
         self.progress_bar.show()
         self.result_text.clear()
-        self._status.setText("正在检测中...")
+        self._status.setText(f"正在检测: {basename}...")
         self._status.setStyleSheet("color: #e6a23c; font-size: 14px; padding: 6px;")
 
         self.worker = InspectionWorker(filepath, self.voxel_spin.value(), name, 'output')
@@ -511,7 +545,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_progress(self, msg):
         self.progress_label.setText(msg)
 
-    def _on_finished(self, results):
+    def _display_results(self, results):
+        """在 UI 中显示检测结果（不触发 worker）"""
         self.current_results = results
         dims = results['dims']
         self.result_text.setHtml(
@@ -526,22 +561,91 @@ class MainWindow(QtWidgets.QMainWindow):
         self._render_preview(results)
         self._render_bbox(results)
         self._render_heatmap(results)
+        self.open_dir_btn.setEnabled(True)
+
+    def _on_finished(self, results):
+        # 确定 basename
+        basename = results.get('basename', os.path.basename(self.file_edit.text().strip()))
+        results['basename'] = basename
+
+        # 存储结果
+        self._all_results[basename] = results
+        self._rebuild_file_list()
+
+        # 显示结果
+        self._display_results(results)
+
         self.run_btn.setEnabled(True)
         self.run_btn.setText("开始检测")
+        self.batch_btn.setEnabled(True)
         self.progress_bar.hide()
         self.progress_label.setText("")
-        self.open_dir_btn.setEnabled(True)
-        self._status.setText(f"[OK] 检测完成 - {results['output_dir']}")
+        self._status.setText(f"[OK] {basename} 检测完成 - {results['output_dir']}")
         self._status.setStyleSheet("color: #67c23a; font-size: 14px; padding: 6px;")
 
+        # 批量模式：处理下一个
+        if self._batch_running:
+            self._start_next_batch_item()
+
     def _on_error(self, msg):
-        QtWidgets.QMessageBox.critical(self, "检测失败", f"处理过程中发生错误:\n\n{msg}")
+        basename = os.path.basename(self.file_edit.text().strip())
+        QtWidgets.QMessageBox.critical(self, "检测失败",
+                                       f"文件: {basename}\n\n{msg}")
         self.run_btn.setEnabled(True)
+        self.batch_btn.setEnabled(True)
         self.run_btn.setText("开始检测")
         self.progress_bar.hide()
         self.progress_label.setText("")
-        self._status.setText("[FAIL] 检测失败")
+        self._status.setText(f"[FAIL] {basename} 检测失败")
         self._status.setStyleSheet("color: #f56c6c; font-size: 14px; padding: 6px;")
+        # 批量模式：跳过失败项继续
+        if self._batch_running:
+            self._start_next_batch_item()
+
+    # ==================== 批量检测 ====================
+    def _run_batch(self):
+        if not self._file_paths:
+            QtWidgets.QMessageBox.warning(self, "提示", "文件列表为空，请先导入 PLY 文件。")
+            return
+        # 收集未检测的文件
+        pending = [(b, p) for b, p in self._file_paths.items() if b not in self._all_results]
+        if not pending:
+            QtWidgets.QMessageBox.information(self, "提示", "所有文件已完成检测。")
+            return
+
+        self._batch_queue = pending
+        self._batch_running = True
+        self._batch_total = len(pending)
+        self._batch_done = 0
+        self.run_btn.setEnabled(False)
+        self.batch_btn.setEnabled(False)
+        self._status.setText(f"批量检测: 0/{self._batch_total} ...")
+        self._status.setStyleSheet("color: #409eff; font-size: 14px; padding: 6px;")
+        self._start_next_batch_item()
+
+    def _start_next_batch_item(self):
+        if not self._batch_queue:
+            # 全部完成
+            self._batch_running = False
+            self.run_btn.setEnabled(True)
+            self.batch_btn.setEnabled(True)
+            self.progress_bar.hide()
+            total = sum(1 for b in self._file_paths if b in self._all_results)
+            self._status.setText(f"[OK] 批量检测完成: {total}/{len(self._file_paths)} 个文件")
+            self._status.setStyleSheet("color: #67c23a; font-size: 14px; padding: 6px;")
+            return
+
+        basename, path = self._batch_queue.pop(0)
+        self._batch_done = min(self._batch_total - len(self._batch_queue), self._batch_total)
+        self._status.setText(
+            f"批量检测: {self._batch_done}/{self._batch_total} - {basename}..."
+        )
+        self._status.setStyleSheet("color: #409eff; font-size: 14px; padding: 6px;")
+        self.progress_label.setText(
+            f"进度: {self._batch_done}/{self._batch_total}, 正在处理: {basename}"
+        )
+
+        self._run_inspection(filepath=path, basename=basename)
 
     # ==================== 可视化 ====================
     def _render_preview(self, r):
