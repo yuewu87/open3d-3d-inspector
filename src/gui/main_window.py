@@ -129,9 +129,9 @@ class InspectionWorker(QtCore.QThread):
 
             dim_path = os.path.join(output_dir, 'dimensions.txt')
             with open(dim_path, 'w', encoding='utf-8') as f:
+                f.write(f"文件名: {os.path.basename(self.filepath)}\n")
                 f.write(f"工件名称: {self.workpiece_name}\n")
                 f.write(f"检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"输入文件: {self.filepath}\n")
                 f.write(f"处理后点数: {len(pcd.points)}\n---\n")
                 f.write(f"长度 (X): {dims['length']:.3f} mm\n")
                 f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
@@ -246,10 +246,18 @@ class MainWindow(QtWidgets.QMainWindow):
         tb.addSpacing(8)
 
         self.run_btn = QtWidgets.QPushButton("开始检测")
-        self.run_btn.setObjectName("runBtn")
         self.run_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.run_btn.setMinimumHeight(38)
         self.run_btn.clicked.connect(self._run_inspection)
+        self.run_btn.setStyleSheet(
+            "QPushButton { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 #409eff,stop:1 #3a8ee6); color: white; border: none; "
+            "font-size: 15px; font-weight: bold; padding: 10px 22px; border-radius: 8px; }"
+            "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 #66b1ff,stop:1 #409eff); }"
+            "QPushButton:pressed { background: #3a8ee6; }"
+            "QPushButton:disabled { background: #c0c4cc; color: #ffffff; }"
+        )
         tb.addWidget(self.run_btn)
 
         self.batch_btn = QtWidgets.QPushButton("一键批量检测")
@@ -311,17 +319,16 @@ class MainWindow(QtWidgets.QMainWindow):
         info.setContentsMargins(12, 10, 12, 10)
         info.setSpacing(6)
 
-        info.addWidget(QtWidgets.QLabel("当前文件"))
-        self.file_edit = QtWidgets.QLineEdit()
-        self.file_edit.setPlaceholderText("请导入 PLY 文件...")
-        self.file_edit.setReadOnly(True)
-        info.addWidget(self.file_edit)
-
         name_row = QtWidgets.QHBoxLayout()
         name_row.addWidget(QtWidgets.QLabel("工件名称"))
         self.name_edit = QtWidgets.QLineEdit()
         self.name_edit.setPlaceholderText("自动识别...")
         name_row.addWidget(self.name_edit, 1)
+        self.name_apply_btn = QtWidgets.QPushButton("修改")
+        self.name_apply_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.name_apply_btn.setFixedWidth(60)
+        self.name_apply_btn.clicked.connect(self._apply_name)
+        name_row.addWidget(self.name_apply_btn)
         info.addLayout(name_row)
 
         result_label = QtWidgets.QLabel("检测结果")
@@ -329,14 +336,14 @@ class MainWindow(QtWidgets.QMainWindow):
         info.addWidget(result_label)
         self.result_text = QtWidgets.QTextEdit()
         self.result_text.setReadOnly(True)
-        self.result_text.setMaximumHeight(120)
+        self.result_text.setMinimumHeight(100)
         self.result_text.setStyleSheet(
             "QTextEdit { background: #ffffff; border: 1px solid #e8eaed; border-radius: 6px; "
             "font-family: 'Cascadia Code','Consolas','Microsoft YaHei',monospace; "
             "font-size: 14px; color: #606266; padding: 6px; }"
         )
         self.result_text.setPlaceholderText("等待检测...")
-        info.addWidget(self.result_text)
+        info.addWidget(self.result_text, stretch=1)
 
         self.open_dir_btn = QtWidgets.QPushButton("打开输出目录")
         self.open_dir_btn.setObjectName("openDirBtn")
@@ -465,8 +472,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._file_paths.clear()
         self._all_results.clear()
         self.file_list.clear()
-        self.file_edit.clear()
         self.name_edit.clear()
+        self._current_basename = ''
         self._show_placeholders()
         self.result_text.clear()
         self._status.setText("就绪 — 请导入 PLY 文件开始检测")
@@ -475,18 +482,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_file_selected(self, current, previous):
         if current is None:
             return
-        # 从列表项中提取纯文件名（去掉 [OK] 前缀）
         display = current.text()
         basename = display[5:] if display.startswith("[OK] ") else display
-        path = self._file_paths.get(basename, '')
-        self.file_edit.setText(path)
+        self._current_basename = basename
         auto_name = os.path.splitext(basename)[0]
         if not self.name_edit.text() or self.name_edit.text() in [
             os.path.splitext(os.path.basename(p))[0] for p in self._file_paths.values()
         ]:
             self.name_edit.setText(auto_name)
 
-        # 如果该文件已有缓存结果，直接显示
         if basename in self._all_results:
             self._display_results(self._all_results[basename])
             self._status.setText(f"[OK] {basename} - 已有检测结果")
@@ -498,11 +502,28 @@ class MainWindow(QtWidgets.QMainWindow):
             self._status.setText(f"已选择: {basename} (未检测)")
             self._status.setStyleSheet("color: #909399; font-size: 14px; padding: 6px;")
 
+    def _apply_name(self):
+        """手动确认/修改工件名称"""
+        basename = getattr(self, '_current_basename', '')
+        if not basename:
+            return
+        new_name = self.name_edit.text().strip()
+        if not new_name:
+            new_name = os.path.splitext(basename)[0]
+            self.name_edit.setText(new_name)
+        # 如果已有缓存结果，更新名称
+        if basename in self._all_results:
+            self._all_results[basename]['workpiece_name'] = new_name
+            self._display_results(self._all_results[basename])
+        self._status.setText(f"工件名称已更新: {new_name}")
+        self._status.setStyleSheet("color: #67c23a; font-size: 14px; padding: 6px;")
+
     # ==================== 检测 ====================
     def _run_inspection(self, filepath=None, basename=None):
         # QPushButton.clicked 信号会传 False，需要过滤
         if not isinstance(filepath, str) or not filepath:
-            filepath = self.file_edit.text().strip()
+            basename = getattr(self, '_current_basename', '')
+            filepath = self._file_paths.get(basename, '') if basename else ''
         if not filepath or not os.path.isfile(filepath):
             QtWidgets.QMessageBox.warning(self, "提示", "请先从文件列表中选择一个 PLY 文件。")
             return
@@ -548,7 +569,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_finished(self, results):
         # 确定 basename
-        basename = results.get('basename', os.path.basename(self.file_edit.text().strip()))
+        basename = results.get('basename', '')
         results['basename'] = basename
 
         # 存储结果
@@ -571,7 +592,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._start_next_batch_item()
 
     def _on_error(self, msg):
-        basename = os.path.basename(self.file_edit.text().strip())
+        basename = getattr(self, '_current_basename', 'unknown')
         QtWidgets.QMessageBox.critical(self, "检测失败",
                                        f"文件: {basename}\n\n{msg}")
         self.run_btn.setEnabled(True)
