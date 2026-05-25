@@ -4,6 +4,7 @@ import traceback
 from datetime import datetime
 
 import numpy as np
+import open3d as o3d
 from PyQt5 import QtCore, QtGui, QtWidgets
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -93,12 +94,13 @@ class InspectionWorker(QtCore.QThread):
     error = QtCore.pyqtSignal(str)
     progress = QtCore.pyqtSignal(str)
 
-    def __init__(self, filepath, voxel_size, workpiece_name, output_base):
+    def __init__(self, filepath, voxel_size, workpiece_name, output_base, template_path=None):
         super().__init__()
         self.filepath = filepath
         self.voxel_size = voxel_size
         self.workpiece_name = workpiece_name
         self.output_base = output_base
+        self.template_path = template_path
 
     def run(self):
         try:
@@ -128,14 +130,57 @@ class InspectionWorker(QtCore.QThread):
             os.makedirs(output_dir, exist_ok=True)
 
             dim_path = os.path.join(output_dir, 'dimensions.txt')
+            has_template = self.template_path and os.path.isfile(self.template_path)
+            icp_rmse = None
+            tmpl_deviations = None
+            tmpl_pts = None
+
+            # 模板对比
+            if has_template:
+                self.progress.emit("模板对比 — 加载模板...")
+                pcd_tmpl = load_ply(self.template_path)
+                pcd_tmpl = voxel_downsample(pcd_tmpl, voxel_size=self.voxel_size)
+                pcd_tmpl = estimate_normals(pcd_tmpl)
+                pcd_tmpl = pca_align(pcd_tmpl)
+
+                self.progress.emit("模板对比 — ICP 配准...")
+                reg = o3d.pipelines.registration.registration_icp(
+                    pcd, pcd_tmpl, self.voxel_size * 2, np.eye(4),
+                    o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+                    o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=2000)
+                )
+                pcd.transform(reg.transformation)
+                icp_rmse = reg.inlier_rmse
+
+                # 逐点计算到模板最近点的距离
+                self.progress.emit("模板对比 — 计算偏差...")
+                tmpl_pts = np.asarray(pcd_tmpl.points)
+                tmpl_tree = o3d.geometry.KDTreeFlann(pcd_tmpl)
+                src_pts = np.asarray(pcd.points)
+                tmpl_deviations = np.zeros(len(src_pts))
+                for i, pt in enumerate(src_pts):
+                    _, idx, _ = tmpl_tree.search_knn_vector_3d(pt, 1)
+                    tmpl_deviations[i] = np.linalg.norm(pt - tmpl_pts[idx[0]])
+
+                # 更新尺寸（配准后重新计算）
+                dims = extract_dimensions(pcd)
+
             with open(dim_path, 'w', encoding='utf-8') as f:
                 f.write(f"文件名: {os.path.basename(self.filepath)}\n")
                 f.write(f"工件名称: {self.workpiece_name}\n")
                 f.write(f"检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                if has_template:
+                    f.write(f"模板文件: {os.path.basename(self.template_path)}\n")
+                    f.write(f"ICP RMSE: {icp_rmse:.4f} mm\n")
                 f.write(f"处理后点数: {len(pcd.points)}\n---\n")
                 f.write(f"长度 (X): {dims['length']:.3f} mm\n")
                 f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
                 f.write(f"高度 (Z): {dims['height']:.3f} mm\n")
+                if tmpl_deviations is not None:
+                    f.write(f"---\n模板对比偏差:\n")
+                    f.write(f"最大偏差: {tmpl_deviations.max():.4f} mm\n")
+                    f.write(f"平均偏差: {tmpl_deviations.mean():.4f} mm\n")
+                    f.write(f"标准差: {tmpl_deviations.std():.4f} mm\n")
 
             self.progress.emit("渲染输出图像...")
             bbox_path = os.path.join(output_dir, 'bbox.png')
@@ -143,16 +188,22 @@ class InspectionWorker(QtCore.QThread):
 
             fig_bbox = draw_bounding_box(pcd, dims, title=f"{self.workpiece_name} - Bounding Box")
             fig_bbox.savefig(bbox_path, dpi=150)
-            fig_heat = draw_heatmap(pcd, deviations, title=f"{self.workpiece_name} - Deviation Heatmap")
+
+            heatmap_data = tmpl_deviations if tmpl_deviations is not None else deviations
+            heatmap_title = (f"{self.workpiece_name} vs Template - Deviation"
+                             if has_template else f"{self.workpiece_name} - Deviation Heatmap")
+            fig_heat = draw_heatmap(pcd, heatmap_data, title=heatmap_title)
             fig_heat.savefig(heatmap_path, dpi=150)
 
             self.progress.emit("[OK] 检测完成")
             self.finished.emit({
-                'dims': dims, 'pts': pts, 'corners': corners, 'deviations': deviations,
+                'dims': dims, 'pts': pts, 'corners': corners,
+                'deviations': heatmap_data,
                 'bbox_path': bbox_path, 'heatmap_path': heatmap_path,
                 'dim_path': dim_path, 'output_dir': output_dir,
                 'workpiece_name': self.workpiece_name, 'point_count': len(pcd.points),
                 'basename': os.path.basename(self.filepath),
+                'has_template': has_template, 'icp_rmse': icp_rmse,
             })
         except (FileFormatError, PointCloudValidationError) as e:
             self.error.emit(str(e))
@@ -168,6 +219,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setMinimumSize(1000, 640)
 
         self._file_paths = {}          # basename -> full path
+        self._templates = {}           # basename -> template path (or None)
         self._all_results = {}         # basename -> results dict
         self._batch_queue = []         # remaining batch items
         self.worker = None
@@ -331,6 +383,28 @@ class MainWindow(QtWidgets.QMainWindow):
         name_row.addWidget(self.name_apply_btn)
         info.addLayout(name_row)
 
+        # 模板文件
+        tmpl_row = QtWidgets.QHBoxLayout()
+        tmpl_row.addWidget(QtWidgets.QLabel("标准模板"))
+        self.template_label = QtWidgets.QLabel("未匹配")
+        self.template_label.setStyleSheet(
+            "color: #909399; font-size: 13px; padding: 4px 8px; "
+            "background: #ffffff; border: 1px solid #e8eaed; border-radius: 4px;"
+        )
+        self.template_label.setWordWrap(True)
+        tmpl_row.addWidget(self.template_label, 1)
+        self.template_btn = QtWidgets.QPushButton("指定")
+        self.template_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.template_btn.setFixedWidth(60)
+        self.template_btn.clicked.connect(self._browse_template)
+        tmpl_row.addWidget(self.template_btn)
+        self.template_clear_btn = QtWidgets.QPushButton("清除")
+        self.template_clear_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.template_clear_btn.setFixedWidth(50)
+        self.template_clear_btn.clicked.connect(self._clear_template)
+        tmpl_row.addWidget(self.template_clear_btn)
+        info.addLayout(tmpl_row)
+
         result_label = QtWidgets.QLabel("检测结果")
         result_label.setStyleSheet("font-weight: bold; color: #555;")
         info.addWidget(result_label)
@@ -451,9 +525,18 @@ class MainWindow(QtWidgets.QMainWindow):
         for path in paths:
             basename = os.path.basename(path)
             self._file_paths[basename] = path
+            # 自动匹配模板: 同目录下 <name>_template.ply / <name>_ref.ply / <name>_standard.ply
+            dirname = os.path.dirname(path)
+            stem = os.path.splitext(basename)[0]
+            template = None
+            for suffix in ['_template.ply', '_ref.ply', '_standard.ply']:
+                candidate = os.path.join(dirname, stem + suffix)
+                if os.path.isfile(candidate):
+                    template = candidate
+                    break
+            self._templates[basename] = template
         self._rebuild_file_list()
         if paths:
-            # 自动选中最后一个导入的文件
             self.file_list.setCurrentRow(self.file_list.count() - 1)
 
     def _rebuild_file_list(self):
@@ -468,8 +551,35 @@ class MainWindow(QtWidgets.QMainWindow):
             self.file_list.addItem(item)
         self.file_list.blockSignals(False)
 
+    def _browse_template(self):
+        basename = getattr(self, '_current_basename', '')
+        if not basename:
+            return
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, f"为 {basename} 选择标准模板", "data",
+            "PLY Point Cloud (*.ply);;All Files (*)"
+        )
+        if path:
+            self._templates[basename] = path
+            self.template_label.setText(os.path.basename(path))
+            self.template_label.setStyleSheet(
+                "color: #67c23a; font-size: 13px; padding: 4px 8px; "
+                "background: #f0f9eb; border: 1px solid #c2e7b0; border-radius: 4px;"
+            )
+
+    def _clear_template(self):
+        basename = getattr(self, '_current_basename', '')
+        if basename and basename in self._templates:
+            self._templates[basename] = None
+            self.template_label.setText("无 (仅尺寸检测)")
+            self.template_label.setStyleSheet(
+                "color: #e6a23c; font-size: 13px; padding: 4px 8px; "
+                "background: #fdf6ec; border: 1px solid #f5dab1; border-radius: 4px;"
+            )
+
     def _clear_file_list(self):
         self._file_paths.clear()
+        self._templates.clear()
         self._all_results.clear()
         self.file_list.clear()
         self.name_edit.clear()
@@ -486,6 +596,20 @@ class MainWindow(QtWidgets.QMainWindow):
         basename = display[5:] if display.startswith("[OK] ") else display
         self._current_basename = basename
         self.name_edit.setText(os.path.splitext(basename)[0])
+        # 更新模板显示
+        t = self._templates.get(basename)
+        if t:
+            self.template_label.setText(os.path.basename(t))
+            self.template_label.setStyleSheet(
+                "color: #67c23a; font-size: 13px; padding: 4px 8px; "
+                "background: #f0f9eb; border: 1px solid #c2e7b0; border-radius: 4px;"
+            )
+        else:
+            self.template_label.setText("无 (仅尺寸检测)")
+            self.template_label.setStyleSheet(
+                "color: #e6a23c; font-size: 13px; padding: 4px 8px; "
+                "background: #fdf6ec; border: 1px solid #f5dab1; border-radius: 4px;"
+            )
 
         if basename in self._all_results:
             self._display_results(self._all_results[basename])
@@ -548,7 +672,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status.setText(f"正在检测: {basename}...")
         self._status.setStyleSheet("color: #e6a23c; font-size: 14px; padding: 6px;")
 
-        self.worker = InspectionWorker(filepath, self.voxel_spin.value(), name, 'output')
+        template = self._templates.get(basename) if basename else None
+        self.worker = InspectionWorker(filepath, self.voxel_spin.value(), name, 'output', template)
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_finished)
         self.worker.error.connect(self._on_error)
@@ -561,15 +686,23 @@ class MainWindow(QtWidgets.QMainWindow):
         """在 UI 中显示检测结果（不触发 worker）"""
         self.current_results = results
         dims = results['dims']
-        self.result_text.setHtml(
+        html = (
             f"<p style='margin:4px 0'><b>工件</b>: {results['workpiece_name']}</p>"
             f"<p style='margin:4px 0'><b>处理点数</b>: {results['point_count']:,}</p>"
+        )
+        if results.get('has_template'):
+            html += (
+                f"<p style='margin:4px 0'><b>模板对比</b>: "
+                f"ICP RMSE = {results.get('icp_rmse', 0):.4f} mm</p>"
+            )
+        html += (
             f"<hr style='border:none;border-top:1px solid #e8eaed;margin:8px 0'>"
             f"<p style='margin:4px 0;font-size:16px;color:#303133'>"
             f"<b>L</b>={dims['length']:.2f} mm &nbsp;|&nbsp; "
             f"<b>W</b>={dims['width']:.2f} mm &nbsp;|&nbsp; "
             f"<b>H</b>={dims['height']:.2f} mm</p>"
         )
+        self.result_text.setHtml(html)
         self._render_preview(results)
         self._render_bbox(results)
         self._render_heatmap(results)
@@ -702,12 +835,15 @@ class MainWindow(QtWidgets.QMainWindow):
         ax = canvas.figure.add_subplot(111, projection='3d')
         pts = r['pts']; devs = r['deviations']
         step = max(1, len(pts) // 5000)
+        has_tmpl = r.get('has_template', False)
+        cmap = 'RdYlGn_r' if has_tmpl else 'RdYlGn_r'
         sc = ax.scatter(pts[::step, 0], pts[::step, 1], pts[::step, 2],
-                        c=devs[::step], s=2, cmap='RdYlGn_r', alpha=0.7)
+                        c=devs[::step], s=2, cmap=cmap, alpha=0.7)
         ax.set_xlabel('X (mm)'); ax.set_ylabel('Y (mm)'); ax.set_zlabel('Z (mm)')
-        ax.set_title(f"{r['workpiece_name']} - Deviation Heatmap", fontsize=13)
+        title = f"{r['workpiece_name']} vs Template" if has_tmpl else f"{r['workpiece_name']} - Deviation"
+        ax.set_title(title, fontsize=13)
         cbar = canvas.figure.colorbar(sc, ax=ax, shrink=0.5, aspect=20)
-        cbar.set_label('Deviation (deg)', fontsize=11)
+        cbar.set_label('Deviation (mm)' if has_tmpl else 'Deviation (deg)', fontsize=11)
         canvas.figure.tight_layout(pad=1.5)
         canvas.draw()
 
