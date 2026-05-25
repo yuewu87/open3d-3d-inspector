@@ -29,43 +29,32 @@ STYLESHEET = """
 QMainWindow { background-color: #f0f2f5; }
 QWidget { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 15px; }
 
-#leftPanel { background-color: #ffffff; border-right: 1px solid #e0e0e0; }
-#leftPanel QLabel { color: #555555; font-size: 14px; font-weight: 600; margin-top: 6px; }
-#leftPanel QLineEdit {
+QLineEdit {
     border: 1px solid #dcdfe6; border-radius: 6px; padding: 8px 10px;
     background: #f5f7fa; color: #333; font-size: 14px;
 }
-#leftPanel QLineEdit:focus { border-color: #409eff; background: #ffffff; }
+QLineEdit:focus { border-color: #409eff; background: #ffffff; }
 
-/* 文件列表 */
 #fileList {
-    border: 1px solid #dcdfe6; border-radius: 6px;
-    background: #fafbfc; font-size: 14px; padding: 4px;
+    border: none; border-radius: 0;
+    background: #ffffff; font-size: 14px;
+    outline: none;
 }
-#fileList::item {
-    padding: 6px 8px; border-radius: 4px;
-}
-#fileList::item:selected {
-    background: #ecf5ff; color: #409eff;
-}
+#fileList::item { padding: 10px 14px; border-bottom: 1px solid #f0f2f5; }
+#fileList::item:selected { background: #ecf5ff; color: #409eff; }
 #fileList::item:hover { background: #f5f7fa; }
 
 QPushButton {
-    border-radius: 6px; padding: 9px 18px; font-size: 15px;
+    border-radius: 6px; padding: 8px 16px; font-size: 14px;
     border: 1px solid #dcdfe6; background: #ffffff; color: #606266;
 }
 QPushButton:hover { background: #ecf5ff; border-color: #c6e2ff; color: #409eff; }
 QPushButton:pressed { background: #d9ecff; }
 
-#browseBtn, #importBtn, #importDirBtn {
-    border-radius: 6px; padding: 8px 14px; background: #f0f2f5; font-size: 14px;
-}
-#browseBtn:hover, #importBtn:hover, #importDirBtn:hover { background: #e6e8eb; }
-
 #runBtn {
     background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #409eff,stop:1 #3a8ee6);
-    color: white; border: none; font-size: 18px; font-weight: bold;
-    padding: 14px 28px; border-radius: 8px;
+    color: white; border: none; font-size: 15px; font-weight: bold;
+    padding: 10px 22px; border-radius: 8px;
 }
 #runBtn:hover { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #66b1ff,stop:1 #409eff); }
 #runBtn:pressed { background: #3a8ee6; }
@@ -76,17 +65,11 @@ QPushButton:pressed { background: #d9ecff; }
 }
 #openDirBtn:hover { border-color: #409eff; color: #409eff; }
 
-QProgressBar { border: none; border-radius: 6px; background: #e8eaed; height: 8px; }
+QProgressBar { border: none; border-radius: 3px; background: #e8eaed; height: 6px; }
 QProgressBar::chunk {
     background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #409eff,stop:1 #66b1ff);
-    border-radius: 6px;
+    border-radius: 3px;
 }
-
-QGroupBox {
-    font-weight: bold; color: #303133; border: 1px solid #ebeef5;
-    border-radius: 8px; margin-top: 14px; padding-top: 18px; font-size: 15px;
-}
-QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #606266; }
 
 QTabWidget::pane { border: 1px solid #e0e0e0; border-radius: 8px; background: #ffffff; }
 QTabBar::tab {
@@ -97,7 +80,6 @@ QTabBar::tab {
 QTabBar::tab:selected { background: #ffffff; color: #409eff; font-weight: bold; }
 QTabBar::tab:hover { color: #409eff; background: #ecf5ff; }
 
-QStatusBar { background: #ffffff; border-top: 1px solid #e0e0e0; color: #909399; font-size: 14px; }
 QMessageBox { background: #ffffff; }
 
 QScrollBar:vertical { border: none; background: #f5f7fa; width: 10px; border-radius: 5px; }
@@ -221,150 +203,152 @@ class MainWindow(QtWidgets.QMainWindow):
     def _setup_ui(self):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        root = QtWidgets.QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # ===== 左侧面板 =====
-        left_panel = QtWidgets.QWidget()
-        left_panel.setObjectName("leftPanel")
-        left_panel.setMinimumWidth(320)
-        left_panel.setMaximumWidth(420)
-        left = QtWidgets.QVBoxLayout(left_panel)
-        left.setContentsMargins(18, 18, 18, 18)
-        left.setSpacing(6)
+        # ===== 顶部工具栏 =====
+        toolbar = QtWidgets.QWidget()
+        toolbar.setStyleSheet(
+            "background: #ffffff; border-bottom: 1px solid #e0e0e0; padding: 8px 12px;"
+        )
+        tb = QtWidgets.QHBoxLayout(toolbar)
+        tb.setContentsMargins(12, 8, 12, 8)
+        tb.setSpacing(10)
 
-        # -- 标题 --
-        title = QtWidgets.QLabel("检测控制台")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #303133; padding: 4px 0;")
-        left.addWidget(title)
-
-        # -- 文件列表 --
-        file_group = QtWidgets.QGroupBox("文件列表")
-        fg = QtWidgets.QVBoxLayout(file_group)
-        fg.setSpacing(6)
-
-        import_row = QtWidgets.QHBoxLayout()
         import_btn = QtWidgets.QPushButton("导入文件")
-        import_btn.setObjectName("importBtn")
         import_btn.setCursor(QtCore.Qt.PointingHandCursor)
         import_btn.clicked.connect(self._import_files)
+        tb.addWidget(import_btn)
+
         import_dir_btn = QtWidgets.QPushButton("导入文件夹")
-        import_dir_btn.setObjectName("importDirBtn")
         import_dir_btn.setCursor(QtCore.Qt.PointingHandCursor)
         import_dir_btn.clicked.connect(self._import_dir)
-        import_row.addWidget(import_btn)
-        import_row.addWidget(import_dir_btn)
-        fg.addLayout(import_row)
+        tb.addWidget(import_dir_btn)
 
-        self.file_list = QtWidgets.QListWidget()
-        self.file_list.setObjectName("fileList")
-        self.file_list.setMaximumHeight(140)
-        self.file_list.setAlternatingRowColors(True)
-        self.file_list.currentItemChanged.connect(self._on_file_selected)
-        fg.addWidget(self.file_list)
+        clear_btn = QtWidgets.QPushButton("清空")
+        clear_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        clear_btn.clicked.connect(self._clear_file_list)
+        tb.addWidget(clear_btn)
 
-        left.addWidget(file_group)
+        tb.addSpacing(20)
 
-        # -- 当前选中 --
-        current_group = QtWidgets.QGroupBox("当前文件")
-        cg = QtWidgets.QVBoxLayout(current_group)
-        cg.setSpacing(4)
-        self.file_edit = QtWidgets.QLineEdit()
-        self.file_edit.setPlaceholderText("请导入 PLY 文件...")
-        self.file_edit.setReadOnly(True)
-        cg.addWidget(self.file_edit)
-        left.addWidget(current_group)
-
-        # -- 参数 --
-        param_group = QtWidgets.QGroupBox("参数")
-        pg = QtWidgets.QVBoxLayout(param_group)
-        pg.setSpacing(8)
-        name_row = QtWidgets.QHBoxLayout()
-        name_row.addWidget(QtWidgets.QLabel("工件名称"))
-        self.name_edit = QtWidgets.QLineEdit()
-        self.name_edit.setPlaceholderText("自动识别...")
-        name_row.addWidget(self.name_edit, 1)
-        pg.addLayout(name_row)
-
-        voxel_row = QtWidgets.QHBoxLayout()
-        voxel_row.addWidget(QtWidgets.QLabel("体素尺寸"))
+        tb.addWidget(QtWidgets.QLabel("体素"))
         self.voxel_spin = QtWidgets.QDoubleSpinBox()
         self.voxel_spin.setRange(0.01, 100.0)
         self.voxel_spin.setValue(0.5)
         self.voxel_spin.setDecimals(2)
         self.voxel_spin.setSingleStep(0.1)
         self.voxel_spin.setSuffix(" mm")
-        voxel_row.addWidget(self.voxel_spin, 1)
-        pg.addLayout(voxel_row)
-        left.addWidget(param_group)
+        self.voxel_spin.setFixedWidth(100)
+        tb.addWidget(self.voxel_spin)
 
-        # -- 运行 --
-        left.addSpacing(8)
+        tb.addSpacing(8)
+
         self.run_btn = QtWidgets.QPushButton("开始检测")
         self.run_btn.setObjectName("runBtn")
         self.run_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.run_btn.setMinimumHeight(50)
+        self.run_btn.setMinimumHeight(38)
         self.run_btn.clicked.connect(self._run_inspection)
-        left.addWidget(self.run_btn)
+        tb.addWidget(self.run_btn)
 
         self.batch_btn = QtWidgets.QPushButton("一键批量检测")
-        self.batch_btn.setObjectName("batchBtn")
         self.batch_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.batch_btn.setMinimumHeight(40)
+        self.batch_btn.setMinimumHeight(38)
         self.batch_btn.clicked.connect(self._run_batch)
         self.batch_btn.setStyleSheet(
             "QPushButton { font-size: 15px; font-weight: bold; "
             "border: 2px solid #409eff; color: #409eff; "
-            "border-radius: 8px; padding: 10px 20px; background: #ecf5ff; }"
+            "border-radius: 8px; padding: 8px 18px; background: #ecf5ff; }"
             "QPushButton:hover { background: #d9ecff; }"
             "QPushButton:disabled { border-color: #c0c4cc; color: #c0c4cc; background: #f5f7fa; }"
         )
-        left.addWidget(self.batch_btn)
+        tb.addWidget(self.batch_btn)
 
-        # -- 进度 --
-        left.addSpacing(6)
+        tb.addStretch()
+
         self.progress_label = QtWidgets.QLabel("")
         self.progress_label.setStyleSheet("color: #67c23a; font-size: 14px;")
-        left.addWidget(self.progress_label)
+        tb.addWidget(self.progress_label)
+
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 0)
-        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.setFixedSize(120, 6)
         self.progress_bar.hide()
-        left.addWidget(self.progress_bar)
+        tb.addWidget(self.progress_bar)
 
-        # -- 结果 --
-        left.addSpacing(4)
-        result_group = QtWidgets.QGroupBox("检测结果")
-        rg = QtWidgets.QVBoxLayout(result_group)
+        root.addWidget(toolbar)
+
+        # ===== 主体: 水平分割 =====
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+
+        # -- 左侧: 文件列表 + 信息 --
+        left_panel = QtWidgets.QWidget()
+        left_panel.setObjectName("leftPanel")
+        left_panel.setMinimumWidth(280)
+        left = QtWidgets.QVBoxLayout(left_panel)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(0)
+
+        # 文件列表（占据主要空间）
+        list_header = QtWidgets.QLabel("  文件列表")
+        list_header.setStyleSheet(
+            "font-size: 14px; font-weight: bold; color: #303133; "
+            "padding: 10px 14px; background: #fafbfc; border-bottom: 1px solid #ebeef5;"
+        )
+        left.addWidget(list_header)
+
+        self.file_list = QtWidgets.QListWidget()
+        self.file_list.setObjectName("fileList")
+        self.file_list.setAlternatingRowColors(True)
+        self.file_list.currentItemChanged.connect(self._on_file_selected)
+        left.addWidget(self.file_list, stretch=1)
+
+        # 底部信息区
+        info_widget = QtWidgets.QWidget()
+        info_widget.setStyleSheet("background: #fafbfc; border-top: 1px solid #ebeef5;")
+        info = QtWidgets.QVBoxLayout(info_widget)
+        info.setContentsMargins(12, 10, 12, 10)
+        info.setSpacing(6)
+
+        info.addWidget(QtWidgets.QLabel("当前文件"))
+        self.file_edit = QtWidgets.QLineEdit()
+        self.file_edit.setPlaceholderText("请导入 PLY 文件...")
+        self.file_edit.setReadOnly(True)
+        info.addWidget(self.file_edit)
+
+        name_row = QtWidgets.QHBoxLayout()
+        name_row.addWidget(QtWidgets.QLabel("工件名称"))
+        self.name_edit = QtWidgets.QLineEdit()
+        self.name_edit.setPlaceholderText("自动识别...")
+        name_row.addWidget(self.name_edit, 1)
+        info.addLayout(name_row)
+
+        result_label = QtWidgets.QLabel("检测结果")
+        result_label.setStyleSheet("font-weight: bold; color: #555;")
+        info.addWidget(result_label)
         self.result_text = QtWidgets.QTextEdit()
         self.result_text.setReadOnly(True)
-        self.result_text.setMaximumHeight(150)
+        self.result_text.setMaximumHeight(120)
         self.result_text.setStyleSheet(
-            "QTextEdit { background: transparent; border: none; "
+            "QTextEdit { background: #ffffff; border: 1px solid #e8eaed; border-radius: 6px; "
             "font-family: 'Cascadia Code','Consolas','Microsoft YaHei',monospace; "
-            "font-size: 14px; color: #606266; }"
+            "font-size: 14px; color: #606266; padding: 6px; }"
         )
         self.result_text.setPlaceholderText("等待检测...")
-        rg.addWidget(self.result_text)
-        left.addWidget(result_group)
+        info.addWidget(self.result_text)
 
-        # -- 打开目录 --
         self.open_dir_btn = QtWidgets.QPushButton("打开输出目录")
         self.open_dir_btn.setObjectName("openDirBtn")
         self.open_dir_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.open_dir_btn.clicked.connect(self._open_output_dir)
         self.open_dir_btn.setEnabled(False)
-        left.addWidget(self.open_dir_btn)
+        info.addWidget(self.open_dir_btn)
 
-        left.addStretch()
-
-        version_label = QtWidgets.QLabel("v1.0  |  Open3D 0.19 + PyQt5")
-        version_label.setStyleSheet("color: #c0c4cc; font-size: 12px;")
-        version_label.setAlignment(QtCore.Qt.AlignCenter)
-        left.addWidget(version_label)
-
+        left.addWidget(info_widget)
         splitter.addWidget(left_panel)
 
-        # ===== 右侧可视化 =====
+        # -- 右侧: 可视化 --
         right_panel = QtWidgets.QWidget()
         right = QtWidgets.QVBoxLayout(right_panel)
         right.setContentsMargins(16, 16, 16, 16)
@@ -386,13 +370,11 @@ class MainWindow(QtWidgets.QMainWindow):
         right.addWidget(self._status)
 
         splitter.addWidget(right_panel)
-        splitter.setSizes([340, 1000])
+        splitter.setSizes([320, 1000])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
-        layout = QtWidgets.QVBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(splitter)
+        root.addWidget(splitter, stretch=1)
 
     # ==================== 样式 ====================
     def _apply_style(self):
