@@ -41,23 +41,25 @@ def fpfh_ransac_align(
             search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30)
         )
 
-    # 计算 FPFH 特征
+    # 计算 FPFH 特征（增大搜索半径以获取更多匹配点）
+    feature_radius = voxel_size * 10
     fpfh_src = o3d.pipelines.registration.compute_fpfh_feature(
-        source, o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100)
+        source, o3d.geometry.KDTreeSearchParamHybrid(radius=feature_radius, max_nn=100)
     )
     fpfh_tgt = o3d.pipelines.registration.compute_fpfh_feature(
-        target, o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100)
+        target, o3d.geometry.KDTreeSearchParamHybrid(radius=feature_radius, max_nn=100)
     )
 
     # RANSAC 全局配准
+    ransac_dist = distance_threshold * voxel_size
     result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
         source, target, fpfh_src, fpfh_tgt, True,
-        distance_threshold * voxel_size,
+        ransac_dist,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
-        3,
+        4,
         [o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
-         o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold * voxel_size)],
-        o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999)
+         o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(ransac_dist)],
+        o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 0.999)
     )
     source.transform(result.transformation)
     logger.info(f"FPFH+RANSAC: fitness={result.fitness:.4f}, "

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(claude plugin *)",
+      "Bash(conda run *)",
+      "Bash(D:/Conda_base/envs/open3d_pr/python.exe *)",
+      "Bash(git init *)",
+      "Bash(git config *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(D:\\\\Conda_base\\\\envs\\\\open3d_pr\\\\python.exe *)",
+      "Bash(PYTHONIOENCODING=utf-8 conda run *)",
+      "Bash(git reset *)",
+      "Bash(git rm *)",
+      "Bash(git checkout *)"
+    ]
+  }
+}

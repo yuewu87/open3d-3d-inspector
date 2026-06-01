@@ -168,7 +168,8 @@ class InspectionWorker(QtCore.QThread):
                 pcd_tmpl = pca_align(pcd_tmpl)
 
                 self.progress.emit("模板对比 — FPFH+RANSAC 粗配准...")
-                pcd = fpfh_ransac_align(pcd, pcd_tmpl, voxel_size=self.voxel_size)
+                pcd = fpfh_ransac_align(pcd, pcd_tmpl, voxel_size=self.voxel_size,
+                                       distance_threshold=3.0)
 
                 self.progress.emit("模板对比 — ICP 精配准...")
                 pcd = icp_fine_align(pcd, pcd_tmpl, threshold=self.voxel_size * 2)
@@ -181,13 +182,7 @@ class InspectionWorker(QtCore.QThread):
 
                 # 逐点计算到模板最近点的距离
                 self.progress.emit("模板对比 — 计算偏差...")
-                tmpl_pts = np.asarray(pcd_tmpl.points)
-                tmpl_tree = o3d.geometry.KDTreeFlann(pcd_tmpl)
-                src_pts = np.asarray(pcd.points)
-                tmpl_deviations = np.zeros(len(src_pts))
-                for i, pt in enumerate(src_pts):
-                    _, idx, _ = tmpl_tree.search_knn_vector_3d(pt, 1)
-                    tmpl_deviations[i] = np.linalg.norm(pt - tmpl_pts[idx[0]])
+                tmpl_deviations = np.asarray(pcd.compute_point_cloud_distance(pcd_tmpl))
                 self._log(f"模板偏差: max={tmpl_deviations.max():.4f} "
                          f"mean={tmpl_deviations.mean():.4f} std={tmpl_deviations.std():.4f} mm")
                 # 更新尺寸
