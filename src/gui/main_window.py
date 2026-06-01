@@ -239,6 +239,7 @@ class InspectionWorker(QtCore.QThread):
             }
             obb_corners = np.asarray(obb.get_box_points())
             t_obb = (datetime.now() - t_start).total_seconds()
+            proc_time = t_obb                         # 算法部分到此结束
             self._log(f"OBB: L={obb_dims['length']:.3f} W={obb_dims['width']:.3f} H={obb_dims['height']:.3f} mm")
             if holes:
                 self._log(f"孔洞: {holes}")
@@ -284,7 +285,6 @@ class InspectionWorker(QtCore.QThread):
                     f.write(f"平均偏差: {tmpl_deviations.mean():.4f} mm\n")
                     f.write(f"标准差: {tmpl_deviations.std():.4f} mm\n")
 
-            proc_time = (datetime.now() - t_start).total_seconds()
             self.progress.emit("渲染输出图像...")
             bbox_path = os.path.join(output_dir, 'bbox.png')
             heatmap_path = os.path.join(output_dir, 'heatmap.png')
