@@ -138,7 +138,7 @@ class InspectionWorker(QtCore.QThread):
             deviations = deviation_heatmap(pcd)
 
             self.progress.emit("检测孔洞...")
-            holes = detect_holes(pcd, axis='z', min_diameter=0.5)
+            holes = detect_holes(pcd, axis='z', num_slices=5, min_diameter=0.5)
 
             pts = np.asarray(pcd.points)
             aabb = pcd.get_axis_aligned_bounding_box()
