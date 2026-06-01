@@ -208,9 +208,9 @@ class InspectionWorker(QtCore.QThread):
                 dims = extract_dimensions(pcd)
                 break  # 模板处理完成，退出 while 循环
 
-            # 性能计时
-            elapsed = (datetime.now() - t_start).total_seconds()
-            ms_per_10k = elapsed / max(len(pcd.points), 1) * 10000
+            # 处理耗时（不含渲染）
+            proc_time = (datetime.now() - t_start).total_seconds()
+            proc_ms_per_10k = proc_time / max(len(pcd.points), 1) * 10000
 
             # OBB 有向包围盒
             obb = pcd.get_oriented_bounding_box()
@@ -222,7 +222,8 @@ class InspectionWorker(QtCore.QThread):
             }
             obb_corners = np.asarray(obb.get_box_points())
             self._log(f"OBB: L={obb_dims['length']:.3f} W={obb_dims['width']:.3f} H={obb_dims['height']:.3f} mm")
-            self._log(f"耗时: {elapsed:.2f}s ({ms_per_10k:.2f}s/万点)")
+            self._log(f"处理耗时: {proc_time:.2f}s ({proc_ms_per_10k:.2f}s/万点)")
+            self._log(f"渲染耗时: {render_time:.2f}s, 总耗时: {total_time:.2f}s")
             if holes:
                 self._log(f"孔洞: {holes}")
             if has_template:
@@ -245,8 +246,9 @@ class InspectionWorker(QtCore.QThread):
                 f.write(f"宽度: {obb_dims['width']:.3f} mm\n")
                 f.write(f"高度: {obb_dims['height']:.3f} mm\n")
                 f.write(f"---\n")
-                f.write(f"处理耗时: {elapsed:.2f} 秒\n")
-                f.write(f"性能: {ms_per_10k:.2f} 秒/万点\n")
+                f.write(f"算法耗时: {proc_time:.2f} 秒 ({proc_ms_per_10k:.2f} 秒/万点)\n")
+                f.write(f"渲染耗时: {render_time:.2f} 秒\n")
+                f.write(f"总耗时: {total_time:.2f} 秒\n")
                 if holes:
                     f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
                     for h_idx, d in enumerate(holes, 1):
@@ -270,6 +272,9 @@ class InspectionWorker(QtCore.QThread):
             fig_heat = draw_heatmap(pcd, heatmap_data, title=heatmap_title)
             fig_heat.savefig(heatmap_path, dpi=150)
 
+            total_time = (datetime.now() - t_start).total_seconds()
+            render_time = total_time - proc_time
+
             self.progress.emit("[OK] 检测完成")
             self.finished.emit({
                 'dims': dims, 'pts': pts, 'corners': corners,
@@ -283,7 +288,8 @@ class InspectionWorker(QtCore.QThread):
                 'icp_rmse': icp_rmse,
                 'holes': holes,
                 'obb': obb_dims, 'obb_corners': obb_corners,
-                'elapsed': elapsed, 'ms_per_10k': ms_per_10k,
+                'elapsed': total_time, 'proc_time': proc_time,
+                'render_time': render_time, 'proc_ms_per_10k': proc_ms_per_10k,
             })
         except (FileFormatError, PointCloudValidationError) as e:
             self.error.emit(str(e))
@@ -755,8 +761,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 dims = r['dims']
                 obb = r.get('obb', {})
                 holes = r.get('holes', [])
-                elapsed = r.get('elapsed', 0)
-                ms_per_10k = r.get('ms_per_10k', 0)
+                total_time = r.get('elapsed', 0)
+                proc_time = r.get('proc_time', 0)
+                render_time = r.get('render_time', 0)
+                proc_ms = r.get('proc_ms_per_10k', 0)
                 has_tmpl = r.get('has_template', False)
                 tmpl_name = r.get('template_name', '')
                 icp_rmse = r.get('icp_rmse')
@@ -779,8 +787,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     f.write(f"宽度: {obb['width']:.3f} mm\n")
                     f.write(f"高度: {obb['height']:.3f} mm\n")
                     f.write(f"---\n")
-                    f.write(f"处理耗时: {elapsed:.2f} 秒\n")
-                    f.write(f"性能: {ms_per_10k:.2f} 秒/万点\n")
+                    f.write(f"算法耗时: {proc_time:.2f} 秒 ({proc_ms:.2f} 秒/万点)\n")
+                    f.write(f"渲染耗时: {render_time:.2f} 秒\n")
+                    f.write(f"总耗时: {total_time:.2f} 秒\n")
                     if holes:
                         f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
                         for h_idx, d in enumerate(holes, 1):
@@ -838,15 +847,13 @@ class MainWindow(QtWidgets.QMainWindow):
         """在 UI 中显示检测结果（不触发 worker）"""
         self.current_results = results
         dims = results['dims']
+        proc_ms = results.get('proc_ms_per_10k', 0)
+        perf_color = '#67c23a' if proc_ms <= 2.0 else '#e6a23c'
         html = (
             f"<p style='margin:4px 0'><b>工件</b>: {results['workpiece_name']}</p>"
             f"<p style='margin:4px 0'><b>处理点数</b>: {results['point_count']:,} | "
-            f"<b>耗时</b>: {results.get('elapsed', 0):.1f}s"
-        )
-        ms_per_10k = results.get('ms_per_10k', 0)
-        perf_color = '#67c23a' if ms_per_10k <= 2.0 else '#e6a23c'
-        html += (
-            f" (<span style='color:{perf_color}'>{ms_per_10k:.2f}s/万点</span>)</p>"
+            f"<b>总耗时</b>: {results.get('elapsed', 0):.1f}s | "
+            f"<b>算法</b>: <span style='color:{perf_color}'>{proc_ms:.2f}s/万点</span></p>"
         )
         if results.get('has_template'):
             html += (
