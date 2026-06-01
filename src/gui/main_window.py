@@ -118,31 +118,36 @@ class InspectionWorker(QtCore.QThread):
         try:
             self.progress.emit("正在加载点云文件...")
             pcd = load_ply(self.filepath)
-            self._log(f"加载完成: {len(pcd.points):,} 点")
+            t_load = (datetime.now() - t_start).total_seconds()
+            self._log(f"加载完成: {len(pcd.points):,} 点 ({t_load:.2f}s)")
             self.progress.emit(f"[OK] 已加载 {len(pcd.points):,} 个点")
 
             self.progress.emit("体素降采样中...")
             pcd = voxel_downsample(pcd, voxel_size=self.voxel_size)
-            self._log(f"体素降采样后: {len(pcd.points):,} 点")
+            t_down = (datetime.now() - t_start).total_seconds()
+            self._log(f"体素降采样后: {len(pcd.points):,} 点 ({t_down - t_load:.2f}s)")
             self.progress.emit("离群点滤波中...")
             pcd = statistical_outlier_removal(pcd)
-            self._log(f"离群点滤波后: {len(pcd.points):,} 点")
+            t_filter = (datetime.now() - t_start).total_seconds()
+            self._log(f"离群点滤波后: {len(pcd.points):,} 点 ({t_filter - t_down:.2f}s)")
             self.progress.emit("法线估计中...")
             pcd = estimate_normals(pcd)
+            t_norm = (datetime.now() - t_start).total_seconds()
+            self._log(f"法线估计: {t_norm - t_filter:.2f}s")
             self.progress.emit("PCA 主轴对齐中...")
             pcd = pca_align(pcd)
-            # 预处理耗时（手册要求的指标）
-            preproc_time = (datetime.now() - t_start).total_seconds()
+            t_pca = (datetime.now() - t_start).total_seconds()
+            preproc_time = t_pca
             preproc_ms_per_10k = preproc_time / max(len(pcd.points), 1) * 10000
-            self._log(f"预处理耗时: {preproc_time:.2f}s ({preproc_ms_per_10k:.2f}s/万点)")
+            self._log(f"预处理总耗时: {preproc_time:.2f}s ({preproc_ms_per_10k:.2f}s/万点)")
             self.progress.emit("提取包围盒尺寸...")
             dims = extract_dimensions(pcd)
-            self._log(f"AABB: L={dims['length']:.3f} W={dims['width']:.3f} H={dims['height']:.3f} mm")
+            t_dims = (datetime.now() - t_start).total_seconds()
             self.progress.emit("计算表面偏差...")
             deviations = deviation_heatmap(pcd)
+            t_dev = (datetime.now() - t_start).total_seconds()
 
             self.progress.emit("检测孔洞...")
-            # 孔洞检测：依次尝试 Z / X / Y，取最佳结果
             holes = []
             for try_axis in ['z', 'x', 'y']:
                 h = detect_holes(pcd, axis=try_axis, num_slices=5, min_diameter=0.5)
@@ -150,6 +155,7 @@ class InspectionWorker(QtCore.QThread):
                     holes = h
                     self._log(f"孔洞检测: 轴向={try_axis}, 直径={h}")
                     break
+            t_holes = (datetime.now() - t_start).total_seconds()
 
             pts = np.asarray(pcd.points)
             aabb = pcd.get_axis_aligned_bounding_box()
@@ -219,9 +225,9 @@ class InspectionWorker(QtCore.QThread):
                 dims = extract_dimensions(pcd)
                 break  # 模板处理完成，退出 while 循环
 
-            # 处理耗时（不含渲染）
-            proc_time = (datetime.now() - t_start).total_seconds()
-            proc_ms_per_10k = proc_time / max(len(pcd.points), 1) * 10000
+            t_tmpl = (datetime.now() - t_start).total_seconds()
+            if not has_template:
+                t_tmpl = t_holes
 
             # OBB 有向包围盒
             obb = pcd.get_oriented_bounding_box()
@@ -232,6 +238,7 @@ class InspectionWorker(QtCore.QThread):
                 'height': float(obb_extent[2]),
             }
             obb_corners = np.asarray(obb.get_box_points())
+            t_obb = (datetime.now() - t_start).total_seconds()
             self._log(f"OBB: L={obb_dims['length']:.3f} W={obb_dims['width']:.3f} H={obb_dims['height']:.3f} mm")
             if holes:
                 self._log(f"孔洞: {holes}")
@@ -246,17 +253,27 @@ class InspectionWorker(QtCore.QThread):
                     f.write(f"模板文件: {os.path.basename(self.template_path)}\n")
                     f.write(f"ICP RMSE: {icp_rmse:.4f} mm\n")
                 f.write(f"处理后点数: {len(pcd.points)}\n---\n")
-                f.write(f"AABB 轴对齐包围盒 (平行于坐标轴):\n")
-                f.write(f"长度 (X): {dims['length']:.3f} mm\n")
-                f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
-                f.write(f"高度 (Z): {dims['height']:.3f} mm\n")
-                f.write(f"---\nOBB 有向包围盒 (贴合工件方向):\n")
-                f.write(f"长度: {obb_dims['length']:.3f} mm\n")
-                f.write(f"宽度: {obb_dims['width']:.3f} mm\n")
-                f.write(f"高度: {obb_dims['height']:.3f} mm\n")
+                f.write(f"OBB 有向包围盒:\n")
+                f.write(f"长度 (X): {obb_dims['length']:.3f} mm\n")
+                f.write(f"宽度 (Y): {obb_dims['width']:.3f} mm\n")
+                f.write(f"高度 (Z): {obb_dims['height']:.3f} mm\n")
+                f.write(f"---\n各阶段耗时:\n")
+                f.write(f"加载: {t_load:.2f}s\n")
+                f.write(f"降采样: {t_down - t_load:.2f}s\n")
+                f.write(f"滤波: {t_filter - t_down:.2f}s\n")
+                f.write(f"法线估计: {t_norm - t_filter:.2f}s\n")
+                f.write(f"PCA对齐: {t_pca - t_norm:.2f}s\n")
+                f.write(f"尺寸测量: {t_dims - t_pca:.2f}s\n")
+                f.write(f"偏差计算: {t_dev - t_dims:.2f}s\n")
+                f.write(f"孔洞检测: {t_holes - t_dev:.2f}s\n")
+                if has_template:
+                    f.write(f"模板对比: {t_tmpl - t_holes:.2f}s\n")
+                f.write(f"OBB计算: {t_obb - t_tmpl:.2f}s\n")
                 f.write(f"---\n")
-                f.write(f"预处理耗时: {preproc_time:.2f} 秒 ({preproc_ms_per_10k:.2f} 秒/万点)\n")
-                f.write(f"完整耗时: {proc_time:.2f} 秒 (含测量/孔洞/模板)\n")
+                f.write(f"预处理(加载→PCA): {preproc_time:.2f} 秒 ({preproc_ms_per_10k:.2f} 秒/万点)\n")
+                f.write(f"算法总耗时: {proc_time:.2f} 秒\n")
+                f.write(f"渲染耗时: {render_time:.2f} 秒\n")
+                f.write(f"全流程总耗时: {total_time:.2f} 秒\n")
                 if holes:
                     f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
                     for h_idx, d in enumerate(holes, 1):
@@ -267,6 +284,7 @@ class InspectionWorker(QtCore.QThread):
                     f.write(f"平均偏差: {tmpl_deviations.mean():.4f} mm\n")
                     f.write(f"标准差: {tmpl_deviations.std():.4f} mm\n")
 
+            proc_time = (datetime.now() - t_start).total_seconds()
             self.progress.emit("渲染输出图像...")
             bbox_path = os.path.join(output_dir, 'bbox.png')
             heatmap_path = os.path.join(output_dir, 'heatmap.png')
@@ -790,18 +808,15 @@ class MainWindow(QtWidgets.QMainWindow):
                     if has_tmpl and icp_rmse is not None:
                         f.write(f"ICP RMSE: {icp_rmse:.4f} mm\n")
                     f.write(f"处理后点数: {r['point_count']}\n---\n")
-                    f.write(f"AABB 轴对齐包围盒 (平行于坐标轴):\n")
-                    f.write(f"长度 (X): {dims['length']:.3f} mm\n")
-                    f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
-                    f.write(f"高度 (Z): {dims['height']:.3f} mm\n")
-                    f.write(f"---\nOBB 有向包围盒 (贴合工件方向):\n")
-                    f.write(f"长度: {obb['length']:.3f} mm\n")
-                    f.write(f"宽度: {obb['width']:.3f} mm\n")
-                    f.write(f"高度: {obb['height']:.3f} mm\n")
+                    f.write(f"OBB 有向包围盒:\n")
+                    f.write(f"长度 (X): {obb['length']:.3f} mm\n")
+                    f.write(f"宽度 (Y): {obb['width']:.3f} mm\n")
+                    f.write(f"高度 (Z): {obb['height']:.3f} mm\n")
                     f.write(f"---\n")
-                    f.write(f"预处理耗时: {preproc_time:.2f} 秒 ({preproc_ms:.2f} 秒/万点)\n")
-                    f.write(f"完整耗时: {proc_time:.2f} 秒 (含测量/孔洞/模板)\n")
-                    f.write(f"渲染耗时: {render_time:.2f} 秒, 总耗时: {total_time:.2f} 秒\n")
+                    f.write(f"预处理(加载→PCA): {preproc_time:.2f} 秒 ({preproc_ms:.2f} 秒/万点)\n")
+                    f.write(f"算法总耗时: {proc_time:.2f} 秒\n")
+                    f.write(f"渲染耗时: {render_time:.2f} 秒\n")
+                    f.write(f"全流程总耗时: {total_time:.2f} 秒\n")
                     if holes:
                         f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
                         for h_idx, d in enumerate(holes, 1):
@@ -880,13 +895,9 @@ class MainWindow(QtWidgets.QMainWindow):
         html += (
             f"<hr style='border:none;border-top:1px solid #e8eaed;margin:8px 0'>"
             f"<p style='margin:4px 0;font-size:16px;color:#303133'>"
-            f"<b>OBB</b> L={obb.get('length', dims['length']):.2f} "
-            f"W={obb.get('width', dims['width']):.2f} "
-            f"H={obb.get('height', dims['height']):.2f} mm</p>"
-        )
-        html += (
-            f"<p style='margin:2px 0;font-size:12px;color:#909399'>"
-            f"AABB L={dims['length']:.2f} W={dims['width']:.2f} H={dims['height']:.2f} mm</p>"
+            f"<b>OBB</b> L={obb.get('length', 0):.2f} "
+            f"W={obb.get('width', 0):.2f} "
+            f"H={obb.get('height', 0):.2f} mm</p>"
         )
         if results.get('has_template'):
             html += (
