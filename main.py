@@ -1,4 +1,4 @@
-"""Open3D Industrial 3D Visual Inspection System."""
+"""Open3D Industrial 3D Visual Inspection System.-CLI 命令行版本"""
 import argparse
 import sys
 import io

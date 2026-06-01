@@ -25,17 +25,60 @@ def pca_align(pcd: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
     return result
 
 
+def fpfh_ransac_align(
+    source: o3d.geometry.PointCloud,
+    target: o3d.geometry.PointCloud,
+    voxel_size: float = 1.0,
+    distance_threshold: float = 1.5,
+) -> o3d.geometry.PointCloud:
+    """FPFH+RANSAC 粗配准 —— 基于特征匹配的全局对齐"""
+    if not source.has_normals():
+        source.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30)
+        )
+    if not target.has_normals():
+        target.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30)
+        )
+
+    # 计算 FPFH 特征
+    fpfh_src = o3d.pipelines.registration.compute_fpfh_feature(
+        source, o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100)
+    )
+    fpfh_tgt = o3d.pipelines.registration.compute_fpfh_feature(
+        target, o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 5, max_nn=100)
+    )
+
+    # RANSAC 全局配准
+    result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+        source, target, fpfh_src, fpfh_tgt, True,
+        distance_threshold * voxel_size,
+        o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+        3,
+        [o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+         o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold * voxel_size)],
+        o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999)
+    )
+    source.transform(result.transformation)
+    logger.info(f"FPFH+RANSAC: fitness={result.fitness:.4f}, "
+                f"rmse={result.inlier_rmse:.4f}, "
+                f"correspondence={len(result.correspondence_set)}")
+    return source
+
+
 def icp_fine_align(
     source: o3d.geometry.PointCloud,
     target: o3d.geometry.PointCloud,
-    threshold: float = 0.001,
+    threshold: float = 1.0,
     max_iteration: int = 2000
 ) -> o3d.geometry.PointCloud:
-    """ICP 精配准——多视角拼接时使用"""
+    """ICP 精配准 —— 精细化对齐"""
     reg = o3d.pipelines.registration.registration_icp(
         source, target, threshold, np.eye(4),
         o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=max_iteration)
+        o3d.pipelines.registration.ICPConvergenceCriteria(
+            relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=max_iteration
+        )
     )
     logger.info(f"ICP: fitness={reg.fitness:.4f}, rmse={reg.inlier_rmse:.6f}")
     source.transform(reg.transformation)

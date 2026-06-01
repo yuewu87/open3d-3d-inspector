@@ -12,13 +12,20 @@ class PointCloudValidationError(Exception):
     pass
 
 
+SUPPORTED_FORMATS = ('.ply', '.pcd')
+
+
 def validate_ply(filepath: str) -> bool:
-    """校验 PLY 文件路径是否有效"""
+    """校验点云文件路径（支持 PLY/PCD）"""
     if not os.path.isfile(filepath):
         return False
-    if not filepath.lower().endswith('.ply'):
-        return False
-    return True
+    ext = os.path.splitext(filepath.lower())[1]
+    return ext in SUPPORTED_FORMATS
+
+
+def validate_point_cloud(filepath: str) -> bool:
+    """校验点云文件路径是否有效（推荐使用）"""
+    return validate_ply(filepath)
 
 
 def setup_logging(log_path: str = "inspection.log") -> logging.Logger:

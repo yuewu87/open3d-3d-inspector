@@ -20,8 +20,8 @@ matplotlib.rcParams.update({
 })
 
 from src.preprocessing import load_ply, voxel_downsample, statistical_outlier_removal, estimate_normals
-from src.registration import pca_align
-from src.measurement import extract_dimensions, deviation_heatmap
+from src.registration import pca_align, fpfh_ransac_align, icp_fine_align
+from src.measurement import extract_dimensions, deviation_heatmap, detect_holes, compute_aabb
 from src.visualization import draw_bounding_box, draw_heatmap
 from src.utils import FileFormatError, PointCloudValidationError
 
@@ -103,6 +103,7 @@ class InspectionWorker(QtCore.QThread):
         self.template_path = template_path
 
     def run(self):
+        t_start = datetime.now()
         try:
             self.progress.emit("正在加载点云文件...")
             pcd = load_ply(self.filepath)
@@ -121,6 +122,9 @@ class InspectionWorker(QtCore.QThread):
             self.progress.emit("计算表面偏差...")
             deviations = deviation_heatmap(pcd)
 
+            self.progress.emit("检测孔洞...")
+            holes = detect_holes(pcd, axis='z', min_diameter=0.5)
+
             pts = np.asarray(pcd.points)
             aabb = pcd.get_axis_aligned_bounding_box()
             corners = np.asarray(aabb.get_box_points())
@@ -135,7 +139,7 @@ class InspectionWorker(QtCore.QThread):
             tmpl_deviations = None
             tmpl_pts = None
 
-            # 模板对比
+            # 模板对比: FPFH+RANSAC 粗配准 → ICP 精配准
             if has_template:
                 self.progress.emit("模板对比 — 加载模板...")
                 pcd_tmpl = load_ply(self.template_path)
@@ -143,14 +147,17 @@ class InspectionWorker(QtCore.QThread):
                 pcd_tmpl = estimate_normals(pcd_tmpl)
                 pcd_tmpl = pca_align(pcd_tmpl)
 
-                self.progress.emit("模板对比 — ICP 配准...")
-                reg = o3d.pipelines.registration.registration_icp(
-                    pcd, pcd_tmpl, self.voxel_size * 2, np.eye(4),
-                    o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-                    o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=2000)
+                self.progress.emit("模板对比 — FPFH+RANSAC 粗配准...")
+                pcd = fpfh_ransac_align(pcd, pcd_tmpl, voxel_size=self.voxel_size)
+
+                self.progress.emit("模板对比 — ICP 精配准...")
+                pcd = icp_fine_align(pcd, pcd_tmpl, threshold=self.voxel_size * 2)
+
+                # 计算 ICP RMSE（精配准的 residual）
+                reg_result = o3d.pipelines.registration.evaluate_registration(
+                    pcd, pcd_tmpl, self.voxel_size * 2, np.eye(4)
                 )
-                pcd.transform(reg.transformation)
-                icp_rmse = reg.inlier_rmse
+                icp_rmse = reg_result.inlier_rmse
 
                 # 逐点计算到模板最近点的距离
                 self.progress.emit("模板对比 — 计算偏差...")
@@ -161,8 +168,7 @@ class InspectionWorker(QtCore.QThread):
                 for i, pt in enumerate(src_pts):
                     _, idx, _ = tmpl_tree.search_knn_vector_3d(pt, 1)
                     tmpl_deviations[i] = np.linalg.norm(pt - tmpl_pts[idx[0]])
-
-                # 更新尺寸（配准后重新计算）
+                # 更新尺寸
                 dims = extract_dimensions(pcd)
 
             with open(dim_path, 'w', encoding='utf-8') as f:
@@ -176,6 +182,17 @@ class InspectionWorker(QtCore.QThread):
                 f.write(f"长度 (X): {dims['length']:.3f} mm\n")
                 f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
                 f.write(f"高度 (Z): {dims['height']:.3f} mm\n")
+                f.write(f"---\nOBB 有向包围盒:\n")
+                f.write(f"长度: {obb_dims['length']:.3f} mm\n")
+                f.write(f"宽度: {obb_dims['width']:.3f} mm\n")
+                f.write(f"高度: {obb_dims['height']:.3f} mm\n")
+                f.write(f"---\n")
+                f.write(f"处理耗时: {elapsed:.2f} 秒\n")
+                f.write(f"性能: {ms_per_10k:.2f} 秒/万点\n")
+                if holes:
+                    f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
+                    for h_idx, d in enumerate(holes, 1):
+                        f.write(f"孔 {h_idx}: 直径 {d:.3f} mm\n")
                 if tmpl_deviations is not None:
                     f.write(f"---\n模板对比偏差:\n")
                     f.write(f"最大偏差: {tmpl_deviations.max():.4f} mm\n")
@@ -195,6 +212,18 @@ class InspectionWorker(QtCore.QThread):
             fig_heat = draw_heatmap(pcd, heatmap_data, title=heatmap_title)
             fig_heat.savefig(heatmap_path, dpi=150)
 
+            elapsed = (datetime.now() - t_start).total_seconds()
+            ms_per_10k = elapsed / max(len(pcd.points), 1) * 10000
+
+            # OBB 有向包围盒
+            obb = pcd.get_oriented_bounding_box()
+            obb_extent = obb.extent
+            obb_dims = {
+                'length': float(obb_extent[0]),
+                'width': float(obb_extent[1]),
+                'height': float(obb_extent[2]),
+            }
+
             self.progress.emit("[OK] 检测完成")
             self.finished.emit({
                 'dims': dims, 'pts': pts, 'corners': corners,
@@ -204,6 +233,8 @@ class InspectionWorker(QtCore.QThread):
                 'workpiece_name': self.workpiece_name, 'point_count': len(pcd.points),
                 'basename': os.path.basename(self.filepath),
                 'has_template': has_template, 'icp_rmse': icp_rmse,
+                'holes': holes,
+                'obb': obb_dims, 'elapsed': elapsed, 'ms_per_10k': ms_per_10k,
             })
         except (FileFormatError, PointCloudValidationError) as e:
             self.error.emit(str(e))
@@ -400,7 +431,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tmpl_row.addWidget(self.template_btn)
         self.template_clear_btn = QtWidgets.QPushButton("清除")
         self.template_clear_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.template_clear_btn.setFixedWidth(50)
+        self.template_clear_btn.setFixedWidth(60)
         self.template_clear_btn.clicked.connect(self._clear_template)
         tmpl_row.addWidget(self.template_clear_btn)
         info.addLayout(tmpl_row)
@@ -493,7 +524,7 @@ class MainWindow(QtWidgets.QMainWindow):
             path = url.toLocalFile()
             if os.path.isdir(path):
                 paths.extend(
-                    os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith('.ply')
+                    os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(('.ply', '.pcd'))
                 )
             elif path.lower().endswith('.ply'):
                 paths.append(path)
@@ -504,7 +535,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _import_files(self):
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self, "导入 PLY 点云文件", "data",
-            "PLY Point Cloud (*.ply);;All Files (*)"
+            "Point Cloud (*.ply *.pcd);;PLY (*.ply);;PCD (*.pcd);;All Files (*)"
         )
         if paths:
             self._add_files(paths)
@@ -515,7 +546,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if directory:
             paths = [os.path.join(directory, f) for f in os.listdir(directory)
-                     if f.lower().endswith('.ply')]
+                     if f.lower().endswith(('.ply', '.pcd'))]
             if paths:
                 self._add_files(paths)
             else:
@@ -529,7 +560,8 @@ class MainWindow(QtWidgets.QMainWindow):
             dirname = os.path.dirname(path)
             stem = os.path.splitext(basename)[0]
             template = None
-            for suffix in ['_template.ply', '_ref.ply', '_standard.ply']:
+            for suffix in ['_template.ply', '_ref.ply', '_standard.ply',
+                           '_template.pcd', '_ref.pcd', '_standard.pcd']:
                 candidate = os.path.join(dirname, stem + suffix)
                 if os.path.isfile(candidate):
                     template = candidate
@@ -557,7 +589,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, f"为 {basename} 选择标准模板", "data",
-            "PLY Point Cloud (*.ply);;All Files (*)"
+            "Point Cloud (*.ply *.pcd);;PLY (*.ply);;PCD (*.pcd);;All Files (*)"
         )
         if path:
             self._templates[basename] = path
@@ -688,13 +720,23 @@ class MainWindow(QtWidgets.QMainWindow):
         dims = results['dims']
         html = (
             f"<p style='margin:4px 0'><b>工件</b>: {results['workpiece_name']}</p>"
-            f"<p style='margin:4px 0'><b>处理点数</b>: {results['point_count']:,}</p>"
+            f"<p style='margin:4px 0'><b>处理点数</b>: {results['point_count']:,} | "
+            f"<b>耗时</b>: {results.get('elapsed', 0):.1f}s"
+        )
+        ms_per_10k = results.get('ms_per_10k', 0)
+        perf_color = '#67c23a' if ms_per_10k <= 2.0 else '#e6a23c'
+        html += (
+            f" (<span style='color:{perf_color}'>{ms_per_10k:.2f}s/万点</span>)</p>"
         )
         if results.get('has_template'):
             html += (
                 f"<p style='margin:4px 0'><b>模板对比</b>: "
                 f"ICP RMSE = {results.get('icp_rmse', 0):.4f} mm</p>"
             )
+        holes = results.get('holes', [])
+        if holes:
+            hole_str = ', '.join(f'{d:.2f}' for d in holes)
+            html += f"<p style='margin:4px 0'><b>孔洞直径</b>: {hole_str} mm</p>"
         html += (
             f"<hr style='border:none;border-top:1px solid #e8eaed;margin:8px 0'>"
             f"<p style='margin:4px 0;font-size:16px;color:#303133'>"
