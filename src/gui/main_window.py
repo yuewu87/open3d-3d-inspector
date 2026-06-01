@@ -356,6 +356,11 @@ class MainWindow(QtWidgets.QMainWindow):
         import_dir_btn.clicked.connect(self._import_dir)
         tb.addWidget(import_dir_btn)
 
+        delete_btn = QtWidgets.QPushButton("删除选中")
+        delete_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        delete_btn.clicked.connect(self._delete_selected)
+        tb.addWidget(delete_btn)
+
         clear_btn = QtWidgets.QPushButton("清空")
         clear_btn.setCursor(QtCore.Qt.PointingHandCursor)
         clear_btn.clicked.connect(self._clear_file_list)
@@ -665,6 +670,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 "color: #e6a23c; font-size: 13px; padding: 4px 8px; "
                 "background: #fdf6ec; border: 1px solid #f5dab1; border-radius: 4px;"
             )
+
+    def _delete_selected(self):
+        basename = getattr(self, '_current_basename', '')
+        if not basename:
+            return
+        self._file_paths.pop(basename, None)
+        self._templates.pop(basename, None)
+        self._all_results.pop(basename, None)
+        self._current_basename = ''
+        self._rebuild_file_list()
+        self.name_edit.clear()
+        self._show_placeholders()
+        self.result_text.clear()
+        n = self.file_list.count()
+        self._status.setText(f"已删除: {basename} | 剩余 {n} 个文件" if n else "文件列表为空")
+        self._status.setStyleSheet("color: #909399; font-size: 14px; padding: 6px;")
+        if n > 0:
+            self.file_list.setCurrentRow(0)
 
     def _clear_file_list(self):
         self._file_paths.clear()
