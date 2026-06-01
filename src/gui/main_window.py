@@ -222,8 +222,6 @@ class InspectionWorker(QtCore.QThread):
             }
             obb_corners = np.asarray(obb.get_box_points())
             self._log(f"OBB: L={obb_dims['length']:.3f} W={obb_dims['width']:.3f} H={obb_dims['height']:.3f} mm")
-            self._log(f"处理耗时: {proc_time:.2f}s ({proc_ms_per_10k:.2f}s/万点)")
-            self._log(f"渲染耗时: {render_time:.2f}s, 总耗时: {total_time:.2f}s")
             if holes:
                 self._log(f"孔洞: {holes}")
             if has_template:
@@ -274,6 +272,8 @@ class InspectionWorker(QtCore.QThread):
 
             total_time = (datetime.now() - t_start).total_seconds()
             render_time = total_time - proc_time
+            self._log(f"算法耗时: {proc_time:.2f}s ({proc_ms_per_10k:.2f}s/万点)")
+            self._log(f"渲染耗时: {render_time:.2f}s, 总耗时: {total_time:.2f}s")
 
             self.progress.emit("[OK] 检测完成")
             self.finished.emit({
