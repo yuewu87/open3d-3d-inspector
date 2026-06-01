@@ -220,6 +220,7 @@ class InspectionWorker(QtCore.QThread):
                 'width': float(obb_extent[1]),
                 'height': float(obb_extent[2]),
             }
+            obb_corners = np.asarray(obb.get_box_points())
             self._log(f"OBB: L={obb_dims['length']:.3f} W={obb_dims['width']:.3f} H={obb_dims['height']:.3f} mm")
             self._log(f"耗时: {elapsed:.2f}s ({ms_per_10k:.2f}s/万点)")
             if holes:
@@ -281,7 +282,8 @@ class InspectionWorker(QtCore.QThread):
                 'template_name': os.path.basename(self.template_path) if has_template else '',
                 'icp_rmse': icp_rmse,
                 'holes': holes,
-                'obb': obb_dims, 'elapsed': elapsed, 'ms_per_10k': ms_per_10k,
+                'obb': obb_dims, 'obb_corners': obb_corners,
+                'elapsed': elapsed, 'ms_per_10k': ms_per_10k,
             })
         except (FileFormatError, PointCloudValidationError) as e:
             self.error.emit(str(e))
@@ -523,7 +525,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_canvas = FigureCanvas(Figure(figsize=(6, 5)))
         self.tab_widget.addTab(self.preview_canvas, "  3D 预览  ")
         self.bbox_canvas = FigureCanvas(Figure(figsize=(6, 5)))
-        self.tab_widget.addTab(self.bbox_canvas, "  包围盒  ")
+        self.tab_widget.addTab(self.bbox_canvas, "  包围盒(OBB)  ")
         self.heatmap_canvas = FigureCanvas(Figure(figsize=(6, 5)))
         self.tab_widget.addTab(self.heatmap_canvas, "  偏差热力图  ")
 
@@ -855,17 +857,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if holes:
             hole_str = ', '.join(f'{d:.2f}' for d in holes)
             html += f"<p style='margin:4px 0'><b>孔洞直径</b>: {hole_str} mm</p>"
+        obb = results.get('obb', {})
         html += (
             f"<hr style='border:none;border-top:1px solid #e8eaed;margin:8px 0'>"
-            f"<p style='margin:4px 0;font-size:14px;color:#303133'>"
-            f"<b>AABB</b> L={dims['length']:.2f} W={dims['width']:.2f} H={dims['height']:.2f} mm</p>"
+            f"<p style='margin:4px 0;font-size:16px;color:#303133'>"
+            f"<b>OBB</b> L={obb.get('length', dims['length']):.2f} "
+            f"W={obb.get('width', dims['width']):.2f} "
+            f"H={obb.get('height', dims['height']):.2f} mm</p>"
         )
-        obb = results.get('obb', {})
-        if obb:
-            html += (
-                f"<p style='margin:2px 0;font-size:13px;color:#606266'>"
-                f"<b>OBB</b> L={obb['length']:.2f} W={obb['width']:.2f} H={obb['height']:.2f} mm</p>"
-            )
+        html += (
+            f"<p style='margin:2px 0;font-size:12px;color:#909399'>"
+            f"AABB L={dims['length']:.2f} W={dims['width']:.2f} H={dims['height']:.2f} mm</p>"
+        )
         if results.get('has_template'):
             html += (
                 f"<p style='margin:2px 0;font-size:13px;color:#e6a23c'>"
@@ -983,18 +986,22 @@ class MainWindow(QtWidgets.QMainWindow):
         step = max(1, len(pts) // 5000)
         ax.scatter(pts[::step, 0], pts[::step, 1], pts[::step, 2],
                    s=1, alpha=0.5, c='#c0c4cc')
-        corners = r['corners']
+        corners = r.get('obb_corners', r['corners'])
         edges = [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)]
         for i, j in edges:
             ax.plot([corners[i,0], corners[j,0]], [corners[i,1], corners[j,1]],
                     [corners[i,2], corners[j,2]], color='#f56c6c', linewidth=2)
-        dims = r['dims']
+        obb = r.get('obb', {})
+        if obb:
+            dims = obb
+        else:
+            dims = r['dims']
         ax.text2D(0.02, 0.96, f"L={dims['length']:.1f}  W={dims['width']:.1f}  H={dims['height']:.1f}",
                   transform=ax.transAxes, fontsize=13, verticalalignment='top',
                   bbox=dict(boxstyle='round,pad=0.4', facecolor='#fffbe6',
                            edgecolor='#e6a23c', alpha=0.9))
         ax.set_xlabel('X (mm)'); ax.set_ylabel('Y (mm)'); ax.set_zlabel('Z (mm)')
-        ax.set_title(f"{r['workpiece_name']} - Bounding Box", fontsize=13)
+        ax.set_title(f"{r['workpiece_name']} - OBB Bounding Box", fontsize=13)
         canvas.figure.tight_layout(pad=1.5)
         canvas.draw()
 
