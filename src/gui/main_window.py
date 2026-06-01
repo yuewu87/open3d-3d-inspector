@@ -761,6 +761,11 @@ class MainWindow(QtWidgets.QMainWindow):
                         f.write(f"最大偏差: {devs.max():.4f} mm\n")
                         f.write(f"平均偏差: {devs.mean():.4f} mm\n")
                         f.write(f"标准差: {devs.std():.4f} mm\n")
+                # 追加日志
+                log_path = os.path.join(os.path.dirname(dim_path), 'inspection.log')
+                if os.path.exists(log_path):
+                    with open(log_path, 'a', encoding='utf-8') as lf:
+                        lf.write(f"{datetime.now().strftime('%H:%M:%S')} | 工件名称已修改为: {new_name}\n")
         self._status.setText(f"工件名称已更新: {new_name}")
         self._status.setStyleSheet("color: #67c23a; font-size: 14px; padding: 6px;")
 
