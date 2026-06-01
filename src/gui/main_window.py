@@ -722,17 +722,45 @@ class MainWindow(QtWidgets.QMainWindow):
             r = self._all_results[basename]
             r['workpiece_name'] = new_name
             self._display_results(r)
-            # 重写 dimensions.txt
             dim_path = r.get('dim_path', '')
             if dim_path and os.path.exists(dim_path):
+                dims = r['dims']
+                obb = r.get('obb', {})
+                holes = r.get('holes', [])
+                elapsed = r.get('elapsed', 0)
+                ms_per_10k = r.get('ms_per_10k', 0)
+                has_tmpl = r.get('has_template', False)
+                icp_rmse = r.get('icp_rmse')
+                devs = r.get('deviations')
                 with open(dim_path, 'w', encoding='utf-8') as f:
                     f.write(f"文件名: {basename}\n")
                     f.write(f"工件名称: {new_name}\n")
                     f.write(f"检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    if has_tmpl:
+                        f.write(f"模板文件: {os.path.basename(self._templates.get(basename, ''))}\n")
+                        if icp_rmse is not None:
+                            f.write(f"ICP RMSE: {icp_rmse:.4f} mm\n")
                     f.write(f"处理后点数: {r['point_count']}\n---\n")
-                    f.write(f"长度 (X): {r['dims']['length']:.3f} mm\n")
-                    f.write(f"宽度 (Y): {r['dims']['width']:.3f} mm\n")
-                    f.write(f"高度 (Z): {r['dims']['height']:.3f} mm\n")
+                    f.write(f"AABB 轴对齐包围盒 (平行于坐标轴):\n")
+                    f.write(f"长度 (X): {dims['length']:.3f} mm\n")
+                    f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
+                    f.write(f"高度 (Z): {dims['height']:.3f} mm\n")
+                    if obb:
+                        f.write(f"---\nOBB 有向包围盒 (贴合工件方向):\n")
+                        f.write(f"长度: {obb['length']:.3f} mm\n")
+                        f.write(f"宽度: {obb['width']:.3f} mm\n")
+                        f.write(f"高度: {obb['height']:.3f} mm\n")
+                    f.write(f"---\n处理耗时: {elapsed:.2f} 秒\n")
+                    f.write(f"性能: {ms_per_10k:.2f} 秒/万点\n")
+                    if holes:
+                        f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
+                        for h_idx, d in enumerate(holes, 1):
+                            f.write(f"孔 {h_idx}: 直径 {d:.3f} mm\n")
+                    if has_tmpl and devs is not None and len(devs) > 0:
+                        f.write(f"---\n模板对比偏差:\n")
+                        f.write(f"最大偏差: {devs.max():.4f} mm\n")
+                        f.write(f"平均偏差: {devs.mean():.4f} mm\n")
+                        f.write(f"标准差: {devs.std():.4f} mm\n")
         self._status.setText(f"工件名称已更新: {new_name}")
         self._status.setStyleSheet("color: #67c23a; font-size: 14px; padding: 6px;")
 
