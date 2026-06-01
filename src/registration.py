@@ -53,7 +53,7 @@ def fpfh_ransac_align(
     # RANSAC 全局配准
     ransac_dist = distance_threshold * voxel_size
     result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-        source, target, fpfh_src, fpfh_tgt, True,
+        source, target, fpfh_src, fpfh_tgt, False,
         ransac_dist,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
         4,

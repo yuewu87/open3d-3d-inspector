@@ -276,7 +276,9 @@ class InspectionWorker(QtCore.QThread):
                 'dim_path': dim_path, 'output_dir': output_dir,
                 'workpiece_name': self.workpiece_name, 'point_count': len(pcd.points),
                 'basename': os.path.basename(self.filepath),
-                'has_template': has_template, 'icp_rmse': icp_rmse,
+                'has_template': has_template,
+                'template_name': os.path.basename(self.template_path) if has_template else '',
+                'icp_rmse': icp_rmse,
                 'holes': holes,
                 'obb': obb_dims, 'elapsed': elapsed, 'ms_per_10k': ms_per_10k,
             })
@@ -730,33 +732,34 @@ class MainWindow(QtWidgets.QMainWindow):
                 elapsed = r.get('elapsed', 0)
                 ms_per_10k = r.get('ms_per_10k', 0)
                 has_tmpl = r.get('has_template', False)
+                tmpl_name = r.get('template_name', '')
                 icp_rmse = r.get('icp_rmse')
                 devs = r.get('deviations')
                 with open(dim_path, 'w', encoding='utf-8') as f:
                     f.write(f"文件名: {basename}\n")
                     f.write(f"工件名称: {new_name}\n")
                     f.write(f"检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    if has_tmpl:
-                        f.write(f"模板文件: {os.path.basename(self._templates.get(basename, ''))}\n")
-                        if icp_rmse is not None:
-                            f.write(f"ICP RMSE: {icp_rmse:.4f} mm\n")
+                    if has_tmpl and tmpl_name:
+                        f.write(f"模板文件: {tmpl_name}\n")
+                    if has_tmpl and icp_rmse is not None:
+                        f.write(f"ICP RMSE: {icp_rmse:.4f} mm\n")
                     f.write(f"处理后点数: {r['point_count']}\n---\n")
                     f.write(f"AABB 轴对齐包围盒 (平行于坐标轴):\n")
                     f.write(f"长度 (X): {dims['length']:.3f} mm\n")
                     f.write(f"宽度 (Y): {dims['width']:.3f} mm\n")
                     f.write(f"高度 (Z): {dims['height']:.3f} mm\n")
-                    if obb:
-                        f.write(f"---\nOBB 有向包围盒 (贴合工件方向):\n")
-                        f.write(f"长度: {obb['length']:.3f} mm\n")
-                        f.write(f"宽度: {obb['width']:.3f} mm\n")
-                        f.write(f"高度: {obb['height']:.3f} mm\n")
-                    f.write(f"---\n处理耗时: {elapsed:.2f} 秒\n")
+                    f.write(f"---\nOBB 有向包围盒 (贴合工件方向):\n")
+                    f.write(f"长度: {obb['length']:.3f} mm\n")
+                    f.write(f"宽度: {obb['width']:.3f} mm\n")
+                    f.write(f"高度: {obb['height']:.3f} mm\n")
+                    f.write(f"---\n")
+                    f.write(f"处理耗时: {elapsed:.2f} 秒\n")
                     f.write(f"性能: {ms_per_10k:.2f} 秒/万点\n")
                     if holes:
                         f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
                         for h_idx, d in enumerate(holes, 1):
                             f.write(f"孔 {h_idx}: 直径 {d:.3f} mm\n")
-                    if has_tmpl and devs is not None and len(devs) > 0:
+                    if has_tmpl and devs is not None:
                         f.write(f"---\n模板对比偏差:\n")
                         f.write(f"最大偏差: {devs.max():.4f} mm\n")
                         f.write(f"平均偏差: {devs.mean():.4f} mm\n")
