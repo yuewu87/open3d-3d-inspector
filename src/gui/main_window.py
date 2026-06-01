@@ -171,6 +171,19 @@ class InspectionWorker(QtCore.QThread):
                 # 更新尺寸
                 dims = extract_dimensions(pcd)
 
+            # 性能计时
+            elapsed = (datetime.now() - t_start).total_seconds()
+            ms_per_10k = elapsed / max(len(pcd.points), 1) * 10000
+
+            # OBB 有向包围盒
+            obb = pcd.get_oriented_bounding_box()
+            obb_extent = obb.extent
+            obb_dims = {
+                'length': float(obb_extent[0]),
+                'width': float(obb_extent[1]),
+                'height': float(obb_extent[2]),
+            }
+
             with open(dim_path, 'w', encoding='utf-8') as f:
                 f.write(f"文件名: {os.path.basename(self.filepath)}\n")
                 f.write(f"工件名称: {self.workpiece_name}\n")
@@ -211,18 +224,6 @@ class InspectionWorker(QtCore.QThread):
                              if has_template else f"{self.workpiece_name} - Deviation Heatmap")
             fig_heat = draw_heatmap(pcd, heatmap_data, title=heatmap_title)
             fig_heat.savefig(heatmap_path, dpi=150)
-
-            elapsed = (datetime.now() - t_start).total_seconds()
-            ms_per_10k = elapsed / max(len(pcd.points), 1) * 10000
-
-            # OBB 有向包围盒
-            obb = pcd.get_oriented_bounding_box()
-            obb_extent = obb.extent
-            obb_dims = {
-                'length': float(obb_extent[0]),
-                'width': float(obb_extent[1]),
-                'height': float(obb_extent[2]),
-            }
 
             self.progress.emit("[OK] 检测完成")
             self.finished.emit({
