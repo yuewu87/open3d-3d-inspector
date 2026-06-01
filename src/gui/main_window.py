@@ -93,6 +93,7 @@ class InspectionWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(dict)
     error = QtCore.pyqtSignal(str)
     progress = QtCore.pyqtSignal(str)
+    timeout = QtCore.pyqtSignal(str)   # 模板超时通知
 
     def __init__(self, filepath, voxel_size, workpiece_name, output_base, template_path=None):
         super().__init__()
@@ -162,7 +163,7 @@ class InspectionWorker(QtCore.QThread):
             TEMPLATE_TIMEOUT = 30
             while has_template:
                 if (datetime.now() - t_start).total_seconds() > TEMPLATE_TIMEOUT:
-                    self.progress.emit("模板对比超时，跳过模板，使用无模板模式")
+                    self.timeout.emit("模板对比超时(>30s)，跳过模板对比，使用无模板模式")
                     self._log("模板对比超时 (>30s)，跳过")
                     has_template = False
                     break
@@ -799,7 +800,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_finished)
         self.worker.error.connect(self._on_error)
+        self.worker.timeout.connect(self._on_timeout)
         self.worker.start()
+
+    def _on_timeout(self, msg):
+        QtWidgets.QMessageBox.warning(self, "模板超时", msg)
 
     def _on_progress(self, msg):
         self.progress_label.setText(msg)
