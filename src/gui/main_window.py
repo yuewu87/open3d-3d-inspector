@@ -273,8 +273,6 @@ class InspectionWorker(QtCore.QThread):
                 f.write(f"---\n")
                 f.write(f"预处理(加载→PCA): {preproc_time:.2f} 秒 ({preproc_ms_per_10k:.2f} 秒/万点)\n")
                 f.write(f"算法总耗时: {proc_time:.2f} 秒\n")
-                f.write(f"渲染耗时: {render_time:.2f} 秒\n")
-                f.write(f"全流程总耗时: {total_time:.2f} 秒\n")
                 if holes:
                     f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
                     for h_idx, d in enumerate(holes, 1):
