@@ -245,8 +245,6 @@ class InspectionWorker(QtCore.QThread):
                 f.write(f"高度: {obb_dims['height']:.3f} mm\n")
                 f.write(f"---\n")
                 f.write(f"算法耗时: {proc_time:.2f} 秒 ({proc_ms_per_10k:.2f} 秒/万点)\n")
-                f.write(f"渲染耗时: {render_time:.2f} 秒\n")
-                f.write(f"总耗时: {total_time:.2f} 秒\n")
                 if holes:
                     f.write(f"---\n检测到 {len(holes)} 个孔洞:\n")
                     for h_idx, d in enumerate(holes, 1):
