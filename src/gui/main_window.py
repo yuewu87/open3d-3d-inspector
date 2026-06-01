@@ -158,11 +158,23 @@ class InspectionWorker(QtCore.QThread):
             tmpl_deviations = None
             tmpl_pts = None
 
-            # 模板对比: FPFH+RANSAC 粗配准 → ICP 精配准
-            if has_template:
+            # 模板对比: FPFH+RANSAC 粗配准 → ICP 精配准（超时 30s 则跳过）
+            TEMPLATE_TIMEOUT = 30
+            while has_template:
+                if (datetime.now() - t_start).total_seconds() > TEMPLATE_TIMEOUT:
+                    self.progress.emit("模板对比超时，跳过模板，使用无模板模式")
+                    self._log("模板对比超时 (>30s)，跳过")
+                    has_template = False
+                    break
+
                 self.progress.emit("模板对比 — 加载模板...")
                 self._log(f"加载模板: {os.path.basename(self.template_path)}")
                 pcd_tmpl = load_ply(self.template_path)
+                if (datetime.now() - t_start).total_seconds() > TEMPLATE_TIMEOUT:
+                    self._log("模板加载超时，跳过")
+                    has_template = False
+                    break
+
                 pcd_tmpl = voxel_downsample(pcd_tmpl, voxel_size=self.voxel_size)
                 pcd_tmpl = estimate_normals(pcd_tmpl)
                 pcd_tmpl = pca_align(pcd_tmpl)
@@ -170,9 +182,17 @@ class InspectionWorker(QtCore.QThread):
                 self.progress.emit("模板对比 — FPFH+RANSAC 粗配准...")
                 pcd = fpfh_ransac_align(pcd, pcd_tmpl, voxel_size=self.voxel_size,
                                        distance_threshold=3.0)
+                if (datetime.now() - t_start).total_seconds() > TEMPLATE_TIMEOUT:
+                    self._log("FPFH+RANSAC 超时，跳过")
+                    has_template = False
+                    break
 
                 self.progress.emit("模板对比 — ICP 精配准...")
                 pcd = icp_fine_align(pcd, pcd_tmpl, threshold=self.voxel_size * 2)
+                if (datetime.now() - t_start).total_seconds() > TEMPLATE_TIMEOUT:
+                    self._log("ICP 超时，跳过")
+                    has_template = False
+                    break
 
                 reg_result = o3d.pipelines.registration.evaluate_registration(
                     pcd, pcd_tmpl, self.voxel_size * 2, np.eye(4)
@@ -180,13 +200,12 @@ class InspectionWorker(QtCore.QThread):
                 icp_rmse = reg_result.inlier_rmse
                 self._log(f"ICP RMSE: {icp_rmse:.4f} mm")
 
-                # 逐点计算到模板最近点的距离
                 self.progress.emit("模板对比 — 计算偏差...")
                 tmpl_deviations = np.asarray(pcd.compute_point_cloud_distance(pcd_tmpl))
                 self._log(f"模板偏差: max={tmpl_deviations.max():.4f} "
                          f"mean={tmpl_deviations.mean():.4f} std={tmpl_deviations.std():.4f} mm")
-                # 更新尺寸
                 dims = extract_dimensions(pcd)
+                break  # 模板处理完成，退出 while 循环
 
             # 性能计时
             elapsed = (datetime.now() - t_start).total_seconds()
