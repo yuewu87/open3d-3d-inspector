@@ -102,23 +102,37 @@ class InspectionWorker(QtCore.QThread):
         self.output_base = output_base
         self.template_path = template_path
 
+    def _log(self, msg):
+        """写入日志到输出目录"""
+        path = getattr(self, '_log_path', None)
+        if path:
+            try:
+                with open(path, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now().strftime('%H:%M:%S')} | {msg}\n")
+            except Exception:
+                pass
+
     def run(self):
         t_start = datetime.now()
         try:
             self.progress.emit("正在加载点云文件...")
             pcd = load_ply(self.filepath)
+            self._log(f"加载完成: {len(pcd.points):,} 点")
             self.progress.emit(f"[OK] 已加载 {len(pcd.points):,} 个点")
 
             self.progress.emit("体素降采样中...")
             pcd = voxel_downsample(pcd, voxel_size=self.voxel_size)
+            self._log(f"体素降采样后: {len(pcd.points):,} 点")
             self.progress.emit("离群点滤波中...")
             pcd = statistical_outlier_removal(pcd)
+            self._log(f"离群点滤波后: {len(pcd.points):,} 点")
             self.progress.emit("法线估计中...")
             pcd = estimate_normals(pcd)
             self.progress.emit("PCA 主轴对齐中...")
             pcd = pca_align(pcd)
             self.progress.emit("提取包围盒尺寸...")
             dims = extract_dimensions(pcd)
+            self._log(f"AABB: L={dims['length']:.3f} W={dims['width']:.3f} H={dims['height']:.3f} mm")
             self.progress.emit("计算表面偏差...")
             deviations = deviation_heatmap(pcd)
 
@@ -133,8 +147,13 @@ class InspectionWorker(QtCore.QThread):
             output_dir = os.path.join(self.output_base, f"{self.workpiece_name}_{timestamp}")
             os.makedirs(output_dir, exist_ok=True)
 
+            self._log_path = os.path.join(output_dir, 'inspection.log')
             dim_path = os.path.join(output_dir, 'dimensions.txt')
+            self._log(f"工件: {self.workpiece_name}")
+            self._log(f"文件: {os.path.basename(self.filepath)}")
+            self._log(f"体素尺寸: {self.voxel_size} mm")
             has_template = self.template_path and os.path.isfile(self.template_path)
+            self._log(f"模板: {'有' if has_template else '无'}")
             icp_rmse = None
             tmpl_deviations = None
             tmpl_pts = None
@@ -142,6 +161,7 @@ class InspectionWorker(QtCore.QThread):
             # 模板对比: FPFH+RANSAC 粗配准 → ICP 精配准
             if has_template:
                 self.progress.emit("模板对比 — 加载模板...")
+                self._log(f"加载模板: {os.path.basename(self.template_path)}")
                 pcd_tmpl = load_ply(self.template_path)
                 pcd_tmpl = voxel_downsample(pcd_tmpl, voxel_size=self.voxel_size)
                 pcd_tmpl = estimate_normals(pcd_tmpl)
@@ -153,11 +173,11 @@ class InspectionWorker(QtCore.QThread):
                 self.progress.emit("模板对比 — ICP 精配准...")
                 pcd = icp_fine_align(pcd, pcd_tmpl, threshold=self.voxel_size * 2)
 
-                # 计算 ICP RMSE（精配准的 residual）
                 reg_result = o3d.pipelines.registration.evaluate_registration(
                     pcd, pcd_tmpl, self.voxel_size * 2, np.eye(4)
                 )
                 icp_rmse = reg_result.inlier_rmse
+                self._log(f"ICP RMSE: {icp_rmse:.4f} mm")
 
                 # 逐点计算到模板最近点的距离
                 self.progress.emit("模板对比 — 计算偏差...")
@@ -168,6 +188,8 @@ class InspectionWorker(QtCore.QThread):
                 for i, pt in enumerate(src_pts):
                     _, idx, _ = tmpl_tree.search_knn_vector_3d(pt, 1)
                     tmpl_deviations[i] = np.linalg.norm(pt - tmpl_pts[idx[0]])
+                self._log(f"模板偏差: max={tmpl_deviations.max():.4f} "
+                         f"mean={tmpl_deviations.mean():.4f} std={tmpl_deviations.std():.4f} mm")
                 # 更新尺寸
                 dims = extract_dimensions(pcd)
 
@@ -183,6 +205,12 @@ class InspectionWorker(QtCore.QThread):
                 'width': float(obb_extent[1]),
                 'height': float(obb_extent[2]),
             }
+            self._log(f"OBB: L={obb_dims['length']:.3f} W={obb_dims['width']:.3f} H={obb_dims['height']:.3f} mm")
+            self._log(f"耗时: {elapsed:.2f}s ({ms_per_10k:.2f}s/万点)")
+            if holes:
+                self._log(f"孔洞: {holes}")
+            if has_template:
+                self._log(f"ICP RMSE: {icp_rmse:.4f} mm")
 
             with open(dim_path, 'w', encoding='utf-8') as f:
                 f.write(f"文件名: {os.path.basename(self.filepath)}\n")
@@ -548,15 +576,25 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if directory:
             paths = [os.path.join(directory, f) for f in os.listdir(directory)
-                     if f.lower().endswith(('.ply', '.pcd'))]
+                     if f.lower().endswith(('.ply', '.pcd'))
+                     and not self._is_template_file(f)]
             if paths:
                 self._add_files(paths)
             else:
                 QtWidgets.QMessageBox.information(self, "提示", "该文件夹中没有 PLY 文件。")
 
+    _TEMPLATE_SUFFIXES = ('_template', '_ref', '_standard')
+
+    @classmethod
+    def _is_template_file(cls, basename):
+        stem = os.path.splitext(basename)[0]
+        return any(stem.endswith(s) for s in cls._TEMPLATE_SUFFIXES)
+
     def _add_files(self, paths):
         for path in paths:
             basename = os.path.basename(path)
+            if self._is_template_file(basename):
+                continue  # 跳过模板文件
             self._file_paths[basename] = path
             # 自动匹配模板: 同目录下 <name>_template.ply / <name>_ref.ply / <name>_standard.ply
             dirname = os.path.dirname(path)
@@ -741,11 +779,20 @@ class MainWindow(QtWidgets.QMainWindow):
             html += f"<p style='margin:4px 0'><b>孔洞直径</b>: {hole_str} mm</p>"
         html += (
             f"<hr style='border:none;border-top:1px solid #e8eaed;margin:8px 0'>"
-            f"<p style='margin:4px 0;font-size:16px;color:#303133'>"
-            f"<b>L</b>={dims['length']:.2f} mm &nbsp;|&nbsp; "
-            f"<b>W</b>={dims['width']:.2f} mm &nbsp;|&nbsp; "
-            f"<b>H</b>={dims['height']:.2f} mm</p>"
+            f"<p style='margin:4px 0;font-size:14px;color:#303133'>"
+            f"<b>AABB</b> L={dims['length']:.2f} W={dims['width']:.2f} H={dims['height']:.2f} mm</p>"
         )
+        obb = results.get('obb', {})
+        if obb:
+            html += (
+                f"<p style='margin:2px 0;font-size:13px;color:#606266'>"
+                f"<b>OBB</b> L={obb['length']:.2f} W={obb['width']:.2f} H={obb['height']:.2f} mm</p>"
+            )
+        if results.get('has_template'):
+            html += (
+                f"<p style='margin:2px 0;font-size:13px;color:#e6a23c'>"
+                f"<b>模板偏差</b> ICP RMSE = {results.get('icp_rmse', 0):.4f} mm</p>"
+            )
         self.result_text.setHtml(html)
         self._render_preview(results)
         self._render_bbox(results)
