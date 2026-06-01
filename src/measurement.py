@@ -49,36 +49,37 @@ def cross_section(
 
 
 def detect_holes(
-    pcd: o3d.geometry.PointCloud, axis: str = 'z', num_slices: int = 5, min_diameter: float = 0.5
+    pcd: o3d.geometry.PointCloud, axis: str = 'z', num_slices: int = 10,
+    min_diameter: float = 0.5, max_diameter: float = 100.0
 ) -> list:
-    """检测圆孔并返回直径列表
+    """检测贯穿型圆孔并返回直径列表
 
-    在多个截面上检测圆形孔洞，使用 RANSAC 圆拟合。
+    算法：多截面圆检测 → 跨层一致性过滤（真孔沿轴向连续出现）
     """
     pts = np.asarray(pcd.points)
     axis_idx = {'x': 0, 'y': 1, 'z': 2}[axis]
     other_axes = [i for i in range(3) if i != axis_idx]
 
     bounds = pts[:, axis_idx].min(), pts[:, axis_idx].max()
-    offset = (bounds[1] - bounds[0]) * 0.1
-    positions = np.linspace(bounds[0] + offset, bounds[1] - offset, max(num_slices, 2))
+    margin = (bounds[1] - bounds[0]) * 0.1
+    positions = np.linspace(bounds[0] + margin, bounds[1] - margin, max(num_slices, 3))
+    thickness = (bounds[1] - bounds[0]) / (num_slices * 2)
 
-    all_diameters = []
-    thickness = (bounds[1] - bounds[0]) / (num_slices * 3)
+    # 收集每层的候选圆: [(z_position, diameter, cx, cy), ...]
+    candidates = []
 
     for pos in positions:
         mask = np.abs(pts[:, axis_idx] - pos) < thickness
         slice_pts = pts[mask]
-        if len(slice_pts) < 30:
+        if len(slice_pts) < 50:
             continue
 
-        # 投影到 2D
         xy = slice_pts[:, other_axes]
         center_2d = xy.mean(axis=0)
         angles = np.arctan2(xy[:, 1] - center_2d[1], xy[:, 0] - center_2d[0])
         radii = np.linalg.norm(xy - center_2d, axis=1)
 
-        # 按角度分桶，找半径最小值（孔边界）
+        # 角度分桶
         nbins = 72
         radius_profile = np.full(nbins, np.inf)
         bin_edges = np.linspace(-np.pi, np.pi, nbins + 1)
@@ -87,50 +88,73 @@ def detect_holes(
             if in_bin.any():
                 radius_profile[b] = radii[in_bin].min()
 
-        # 检测孔：角度桶中最小半径显著大于 0 的连续区域
         valid = radius_profile < np.inf
-        if valid.sum() < nbins * 0.5:
+        # 要求至少 60% 角度覆盖
+        if valid.sum() < nbins * 0.6:
             continue
         median_r = np.median(radius_profile[valid])
 
-        # 找内边界（可能是孔的边缘）
+        # 收集内边界点（半径接近 median_r * 0.5，即"内侧"边界的点）
         inner_edges = []
-        gap_threshold = median_r * 0.3
         for b in range(nbins):
             r = radius_profile[b]
-            if r < np.inf and abs(r - median_r) < gap_threshold:
-                # 这个角度有内边界点
+            if r < np.inf and r < median_r * 0.7:
                 angle = (bin_edges[b] + bin_edges[b + 1]) / 2
                 inner_edges.append([center_2d[0] + r * np.cos(angle),
                                     center_2d[1] + r * np.sin(angle)])
 
-        if len(inner_edges) < 12:
+        # 至少 30% 角度有内边界
+        if len(inner_edges) < int(nbins * 0.3):
             continue
 
-        # 用代数圆拟合内边界点
+        # 代数圆拟合
         inner = np.array(inner_edges)
         A = np.column_stack([inner[:, 0], inner[:, 1], np.ones(len(inner))])
-        b = inner[:, 0]**2 + inner[:, 1]**2
+        b_vec = inner[:, 0]**2 + inner[:, 1]**2
         try:
-            sol = np.linalg.lstsq(A, b, rcond=None)[0]
+            sol = np.linalg.lstsq(A, b_vec, rcond=None)[0]
             cx, cy = sol[0] / 2, sol[1] / 2
             r_circle = np.sqrt(sol[2] + cx**2 + cy**2)
             diameter = 2 * r_circle
-            if min_diameter < diameter < median_r * 3:
-                all_diameters.append(float(diameter))
+            if min_diameter < diameter < max_diameter and diameter < median_r * 2:
+                candidates.append((float(pos), float(diameter), float(cx), float(cy)))
         except np.linalg.LinAlgError:
             continue
 
-    if all_diameters:
-        # 聚类去重
-        all_diameters = np.array(all_diameters)
-        unique = []
-        for d in sorted(all_diameters):
-            if not unique or abs(d - unique[-1]) > 0.5:
-                unique.append(d)
-        logger.info(f"检测到 {len(unique)} 个孔洞, 直径: {[f'{d:.2f}' for d in unique]} mm")
-        return unique
-    return []
+    if not candidates:
+        return []
+
+    # 跨层聚类：直径相近（±20%）且在连续层出现
+    candidates.sort(key=lambda x: x[1])  # 按直径排序
+    groups = []
+    used = set()
+    for i, (z_i, d_i, cx_i, cy_i) in enumerate(candidates):
+        if i in used:
+            continue
+        group = [candidates[i]]
+        used.add(i)
+        for j, (z_j, d_j, cx_j, cy_j) in enumerate(candidates):
+            if j in used:
+                continue
+            # 直径相近，且中心距离不远的归为一组
+            if abs(d_j - d_i) / max(d_i, 0.01) < 0.2:
+                group.append(candidates[j])
+                used.add(j)
+        groups.append(group)
+
+    # 只保留跨 >= 2 层的孔（真贯穿孔洞）
+    result = []
+    for g in groups:
+        if len(g) >= 2:
+            avg_d = np.mean([x[1] for x in g])
+            result.append(float(avg_d))
+
+    result = sorted(set(round(d, 1) for d in result))
+    if result:
+        logger.info(f"检测到 {len(result)} 个孔洞(跨层验证), 直径: {result} mm")
+    else:
+        logger.info("未检测到贯穿型孔洞 (跨层验证未通过)")
+    return result
 
 
 def deviation_heatmap(pcd: o3d.geometry.PointCloud) -> np.ndarray:
