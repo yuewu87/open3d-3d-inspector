@@ -1,19 +1,19 @@
 # 3D Inspector — 三维点云视觉检测系统
 
-基于 Open3D + PyQt5 的工业产品三维尺寸检测系统，支持 PLY/PCD 点云预处理、FPFH+RANSAC+ICP 配准、AABB/OBB 包围盒、孔径测量、模板对比偏差分析。
+基于 Open3D + PyQt5 的工业产品三维尺寸检测系统，支持 PLY/PCD 点云预处理、FPFH+RANSAC+ICP 配准、OBB 包围盒、孔径测量、模板对比偏差分析。
 
 ## 功能
 
 - **点云预处理**：PLY/PCD 加载、体素降采样、统计离群滤波、法线估计
 - **自动对齐**：PCA 主轴对齐，将工件旋转到标准坐标系
 - **配准对比**：FPFH+RANSAC 粗配准 + ICP 精配准（RMSE ≤ 0.5mm），支持标准模板偏差分析
-- **尺寸测量**：AABB + OBB 包围盒，自动提取长/宽/高
-- **孔径检测**：截面圆孔检测，自动计算孔径
+- **尺寸测量**：OBB 有向包围盒，自动提取长/宽/高
+- **孔径检测**：多截面圆孔检测 + 跨层一致性验证
 - **偏差热力图**：逐点偏差距离可视化
-- **性能监控**：处理耗时实时显示（目标 ≤ 2s/万点）
+- **性能监控**：各阶段耗时独立统计（目标预处理 ≤ 2s/万点）
 - **批量检测**：一次导入多个文件，一键批量处理，结果独立缓存
-- **模板智能过滤**：导入文件时自动跳过模板文件（`_template` / `_ref` / `_standard` 后缀）
-- **超时保护**：模板对比超过 30 秒自动跳过，写入日志后继续无模板检测
+- **模板智能过滤**：导入时自动跳过模板文件（`_template` / `_ref` / `_standard`）
+- **超时保护**：模板对比超过 30 秒自动弹窗跳过，写入日志后继续无模板检测
 
 ## 环境
 
@@ -70,33 +70,56 @@ data/
 
 ## 检测输出
 
+每个工件在 `output/<名称>_<时间戳>/` 下生成：
+
 ```
-output/<名称>_<时间戳>/
-├── dimensions.txt   # 尺寸、OBB、孔径、性能数据
-├── bbox.png         # 包围盒可视化
+output/01_20260603_143000/
+├── dimensions.txt   # 文件名、工件名、OBB、各阶段耗时、孔径、模板偏差
+├── bbox.png         # OBB 包围盒可视化
 ├── heatmap.png      # 偏差热力图
 └── inspection.log   # 处理日志
 ```
+
+## 打包为 exe
+
+### 方法：PyInstaller + console 模式 + 自动隐藏窗口
+
+Windows 下 Open3D 的 `read_point_cloud` 在 `--windowed` 模式下无法工作，需要 `--console` 编译，代码内隐藏 cmd 窗口：
+
+```bash
+pip install pyinstaller
+pyinstaller --onedir --console --name "3D_Inspector" \
+    --hidden-import=open3d \
+    --hidden-import=matplotlib.backends.backend_qt5agg \
+    --add-binary="<conda_env>/Library/bin/expat.dll:." \
+    --add-binary="<conda_env>/Library/bin/libexpat.dll:." \
+    run_gui.py
+```
+
+产出在 `dist/3D_Inspector/`，双击 `3D_Inspector.exe` 启动（cmd 窗口闪现后自动隐藏）。
+
+> `run_gui.py` 启动时通过 `ctypes.windll` 隐藏控制台窗口，无需额外配置。
 
 ## 项目结构
 
 ```
 open3d_project/
 ├── main.py                  # CLI 入口
-├── run_gui.py               # GUI 入口
+├── run_gui.py               # GUI 入口（含 console 隐藏逻辑）
 ├── requirements.txt
 ├── src/
 │   ├── utils.py             # 校验、日志、异常 (PLY/PCD)
 │   ├── preprocessing.py     # 点云加载、滤波、法线
 │   ├── registration.py      # PCA、FPFH+RANSAC、ICP
-│   ├── measurement.py       # AABB/OBB、孔径检测、偏差
-│   ├── visualization.py     # matplotlib 渲染
+│   ├── measurement.py       # OBB、孔径检测、偏差
+│   ├── visualization.py     # matplotlib 渲染 (CJK 支持)
 │   └── gui/
 │       └── main_window.py   # PyQt5 主窗口
 ├── tests/                   # 单元测试 (pytest)
-├── data/                    # 点云数据
-├── output/                  # 检测结果（gitignore）
-└── docs/                    # 设计文档
+├── data/                    # 点云数据 (Git LFS)
+├── dist/                    # 打包产物 (gitignore)
+├── output/                  # 检测结果 (gitignore)
+└── docs/                    # 设计文档 (gitignore)
 ```
 
 ## 运行测试
