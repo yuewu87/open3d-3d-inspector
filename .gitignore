@@ -1,9 +1,12 @@
 __pycache__/
 *.pyc
 output/
+dist/
 *.png
 *.log
 dimensions.txt
 bbox.png
 heatmap.png
+*.spec
 日志.txt
+.claude/
