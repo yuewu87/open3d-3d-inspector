@@ -9,4 +9,10 @@ bbox.png
 heatmap.png
 *.spec
 日志.txt
+*.docx
+data/*_template.*
+data/*_ref.*
+data/*_standard.*
+docs/
+.vscode/
 .claude/
