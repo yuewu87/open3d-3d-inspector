@@ -39,7 +39,21 @@ def setup_logging(log_path: str = "inspection.log") -> logging.Logger:
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
         logger.addHandler(fh)
-        ch = logging.StreamHandler()
-        ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-        logger.addHandler(ch)
+        # 仅在控制台可用时添加（exe --windowed 模式下 stdout 不存在）
+        import sys as _sys
+        if _sys.stdout and _sys.stderr:
+            ch = logging.StreamHandler()
+            ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+            logger.addHandler(ch)
     return logger
+
+
+# 模块导入时确保 logger 有兜底 handler（避免 exe 窗口模式报错）
+import sys as _sys
+if not logging.getLogger("open3d_inspection").handlers:
+    if _sys.stdout and _sys.stderr:
+        _null = logging.StreamHandler()
+    else:
+        _null = logging.NullHandler()
+    _null.setLevel(logging.WARNING)
+    logging.getLogger("open3d_inspection").addHandler(_null)
