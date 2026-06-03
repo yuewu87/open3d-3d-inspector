@@ -1,12 +1,9 @@
-import logging
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # 非交互后端，避免测试时弹出窗口
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import open3d as o3d
-
-logger = logging.getLogger("open3d_inspection")
 
 # 尝试使用系统中文字体
 _CJK_FONT = None
@@ -21,9 +18,8 @@ for _font_name in ['Microsoft YaHei', 'SimHei', 'SimSun', 'FangSong', 'KaiTi']:
 if _CJK_FONT:
     plt.rcParams['font.sans-serif'] = [_CJK_FONT, 'DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False
-    logger.info(f"Using CJK font: {_CJK_FONT}")
 else:
-    logger.warning("No CJK font found, Chinese characters may not render")
+    pass
 
 
 def draw_bounding_box(pcd: o3d.geometry.PointCloud, dimensions: dict = None, title: str = "包围盒"):
@@ -56,7 +52,6 @@ def draw_bounding_box(pcd: o3d.geometry.PointCloud, dimensions: dict = None, tit
                   transform=ax.transAxes, fontsize=10, verticalalignment='top',
                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
     plt.tight_layout()
-    logger.info(f"包围盒可视化: {title}")
     return fig
 
 
@@ -80,5 +75,4 @@ def draw_heatmap(pcd: o3d.geometry.PointCloud, deviations: np.ndarray, title: st
     cbar = plt.colorbar(sc, ax=ax, shrink=0.5)
     cbar.set_label('偏差 (度)')
     plt.tight_layout()
-    logger.info(f"热力图可视化: {title}")
     return fig

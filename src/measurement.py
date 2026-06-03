@@ -1,8 +1,5 @@
-import logging
 import numpy as np
 import open3d as o3d
-
-logger = logging.getLogger("open3d_inspection")
 
 
 def compute_aabb(pcd: o3d.geometry.PointCloud) -> dict:
@@ -26,9 +23,6 @@ def compute_aabb(pcd: o3d.geometry.PointCloud) -> dict:
 def extract_dimensions(pcd: o3d.geometry.PointCloud) -> dict:
     """提取关键尺寸（AABB 长宽高）"""
     info = compute_aabb(pcd)
-    logger.info(
-        f"尺寸: L={info['length']:.4f} W={info['width']:.4f} H={info['height']:.4f} (mm, AABB)"
-    )
     return {
         'length': info['length'],
         'width': info['width'],
@@ -44,7 +38,6 @@ def cross_section(
     pts = np.asarray(pcd.points)
     axis_idx = {'x': 0, 'y': 1, 'z': 2}[axis]
     mask = np.abs(pts[:, axis_idx] - position) < thickness / 2.0
-    logger.info(f"截面 axis={axis} pos={position}: {mask.sum()} 个点在切片内")
     return pts[mask]
 
 
@@ -150,10 +143,6 @@ def detect_holes(
             result.append(float(avg_d))
 
     result = sorted(set(round(d, 1) for d in result))
-    if result:
-        logger.info(f"检测到 {len(result)} 个孔洞(跨层验证), 直径: {result} mm")
-    else:
-        logger.info("未检测到贯穿型孔洞 (跨层验证未通过)")
     return result
 
 
@@ -168,5 +157,4 @@ def deviation_heatmap(pcd: o3d.geometry.PointCloud) -> np.ndarray:
     directions /= (np.linalg.norm(directions, axis=1, keepdims=True) + 1e-10)
     dot = np.abs(np.sum(normals * directions, axis=1))
     deviations = np.degrees(np.arccos(np.clip(dot, -1, 1)))
-    logger.info(f"热力图: 平均偏差={deviations.mean():.2f} 度")
     return deviations

@@ -1,8 +1,5 @@
-import logging
 import numpy as np
 import open3d as o3d
-
-logger = logging.getLogger("open3d_inspection")
 
 
 def pca_align(pcd: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
@@ -21,7 +18,6 @@ def pca_align(pcd: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
     aligned_pts = centered @ R.T
     result = o3d.geometry.PointCloud()
     result.points = o3d.utility.Vector3dVector(aligned_pts)
-    logger.info(f"PCA 对齐完成。特征值: {eigenvalues[order]}")
     return result
 
 
@@ -62,9 +58,6 @@ def fpfh_ransac_align(
         o3d.pipelines.registration.RANSACConvergenceCriteria(4000000, 0.999)
     )
     source.transform(result.transformation)
-    logger.info(f"FPFH+RANSAC: fitness={result.fitness:.4f}, "
-                f"rmse={result.inlier_rmse:.4f}, "
-                f"correspondence={len(result.correspondence_set)}")
     return source
 
 
@@ -82,6 +75,5 @@ def icp_fine_align(
             relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=max_iteration
         )
     )
-    logger.info(f"ICP: fitness={reg.fitness:.4f}, rmse={reg.inlier_rmse:.6f}")
     source.transform(reg.transformation)
     return source
