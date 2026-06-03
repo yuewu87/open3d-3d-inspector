@@ -29,31 +29,23 @@ def validate_point_cloud(filepath: str) -> bool:
 
 
 def setup_logging(log_path: str = "inspection.log") -> logging.Logger:
-    """配置日志系统，同时输出到文件和控制台"""
+    """配置日志系统，输出到文件"""
     logger = logging.getLogger("open3d_inspection")
     logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path, encoding='utf-8')
-        fh.setFormatter(logging.Formatter(
-            '%(asctime)s | %(levelname)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        ))
-        logger.addHandler(fh)
-        # 仅在控制台可用时添加（exe --windowed 模式下 stdout 不存在）
-        import sys as _sys
-        if _sys.stdout and _sys.stderr:
-            ch = logging.StreamHandler()
-            ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-            logger.addHandler(ch)
+    # 清除已有 handler，重新创建文件 handler
+    for h in list(logger.handlers):
+        logger.removeHandler(h)
+    fh = logging.FileHandler(log_path, encoding='utf-8')
+    fh.setFormatter(logging.Formatter(
+        '%(asctime)s | %(levelname)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    logger.addHandler(fh)
     return logger
 
 
-# 模块导入时确保 logger 有兜底 handler（避免 exe 窗口模式报错）
-import sys as _sys
-if not logging.getLogger("open3d_inspection").handlers:
-    if _sys.stdout and _sys.stderr:
-        _null = logging.StreamHandler()
-    else:
-        _null = logging.NullHandler()
-    _null.setLevel(logging.WARNING)
-    logging.getLogger("open3d_inspection").addHandler(_null)
+# 模块导入时添加 NullHandler 兜底（防止 PyInstaller --windowed 模式下 logging.lastResort 崩溃）
+# lastResort 指向 sys.stderr，但 windowed 模式下 stderr.buffer 为 None，写入会抛 AttributeError
+_null_h = logging.NullHandler()
+_null_h.setLevel(logging.DEBUG)
+logging.getLogger("open3d_inspection").addHandler(_null_h)

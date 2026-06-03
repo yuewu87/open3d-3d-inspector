@@ -115,9 +115,6 @@ class InspectionWorker(QtCore.QThread):
 
     def run(self):
         t_start = datetime.now()
-        # 确保全局 logger 可用（exe 窗口模式下 stdout 不存在）
-        from src.utils import setup_logging
-        setup_logging(os.path.join(self.output_base, 'inspection.log'))
         try:
             self.progress.emit("正在加载点云文件...")
             pcd = load_ply(self.filepath)
