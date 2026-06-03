@@ -44,8 +44,3 @@ def setup_logging(log_path: str = "inspection.log") -> logging.Logger:
     return logger
 
 
-# 模块导入时添加 NullHandler 兜底（防止 PyInstaller --windowed 模式下 logging.lastResort 崩溃）
-# lastResort 指向 sys.stderr，但 windowed 模式下 stderr.buffer 为 None，写入会抛 AttributeError
-_null_h = logging.NullHandler()
-_null_h.setLevel(logging.DEBUG)
-logging.getLogger("open3d_inspection").addHandler(_null_h)
